@@ -1,0 +1,5 @@
+.stack-work/
+editable.cabal
+*~
+
+.DS_Store
