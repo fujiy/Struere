@@ -1,0 +1,67 @@
+cabal-version: 1.12
+
+-- This file has been generated from package.yaml by hpack version 0.31.0.
+--
+-- see: https://github.com/sol/hpack
+--
+-- hash: 5a9172301c0c5b14e6f1be490ff510f1cdceca752fa0d4b8d7397746bdd15eec
+
+name:           struere
+version:        0.1.0.0
+description:    Please see the README on GitHub at <https://github.com/fujiy00/editable#readme>
+homepage:       https://github.com/fujiy00/editable#readme
+bug-reports:    https://github.com/fujiy00/editable/issues
+author:         Yuuki Fujihara
+maintainer:     mail@fujiy.me
+copyright:      2018 Yuuki Fujihara
+license:        BSD3
+license-file:   LICENSE
+build-type:     Simple
+extra-source-files:
+    README.md
+    ChangeLog.md
+
+source-repository head
+  type: git
+  location: https://github.com/fujiy00/editable
+
+library
+  exposed-modules:
+      Data.Struere
+      Data.Struere.Editor
+      Data.Struere.Structure
+  other-modules:
+      Paths_struere
+  hs-source-dirs:
+      src
+  build-depends:
+      base >=4.7 && <5
+    , text
+  default-language: Haskell2010
+
+executable struere-exe
+  main-is: Main.hs
+  other-modules:
+      Paths_struere
+  hs-source-dirs:
+      app
+  ghc-options: -threaded -rtsopts -with-rtsopts=-N
+  build-depends:
+      base >=4.7 && <5
+    , struere
+    , text
+  default-language: Haskell2010
+
+test-suite struere-test
+  type: exitcode-stdio-1.0
+  main-is: Spec.hs
+  other-modules:
+      Paths_struere
+  hs-source-dirs:
+      test
+  ghc-options: -threaded -rtsopts -with-rtsopts=-N
+  build-depends:
+      base >=4.7 && <5
+    , struere
+    , text
+  default-language: Haskell2010
