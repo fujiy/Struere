@@ -4,11 +4,11 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 5a9172301c0c5b14e6f1be490ff510f1cdceca752fa0d4b8d7397746bdd15eec
+-- hash: 690e6f8a9936f66a31773e33da3d1b19262f72bb52a479304b27503f9c97b27e
 
 name:           struere
 version:        0.1.0.0
-description:    Please see the README on GitHub at <https://github.com/fujiy00/editable#readme>
+description:    Please see the README on GitHub at <https://github.com/fujiy00/Struere#readme>
 homepage:       https://github.com/fujiy00/editable#readme
 bug-reports:    https://github.com/fujiy00/editable/issues
 author:         Yuuki Fujihara
@@ -28,15 +28,30 @@ source-repository head
 library
   exposed-modules:
       Data.Struere
+      Data.Struere.Class
       Data.Struere.Editor
+      Data.Struere.Editor.Brick
+      Data.Struere.Editor.Mode
+      Data.Struere.Editor.Protocol
+      Data.Struere.Editor.Structure
+      Data.Struere.Editor.View
+      Data.Struere.Scaffold
       Data.Struere.Structure
   other-modules:
       Paths_struere
   hs-source-dirs:
       src
   build-depends:
-      base >=4.7 && <5
+      aeson
+    , base >=4.7 && <5
+    , bytestring
+    , containers
+    , elm-bridge
+    , hashable
+    , mtl
+    , regex-compat
     , text
+    , websockets
   default-language: Haskell2010
 
 executable struere-exe
@@ -47,9 +62,36 @@ executable struere-exe
       app
   ghc-options: -threaded -rtsopts -with-rtsopts=-N
   build-depends:
-      base >=4.7 && <5
+      aeson
+    , base >=4.7 && <5
+    , bytestring
+    , containers
+    , elm-bridge
+    , hashable
+    , mtl
+    , regex-compat
     , struere
     , text
+    , websockets
+  default-language: Haskell2010
+
+test-suite generate
+  type: exitcode-stdio-1.0
+  main-is: Generate.hs
+  hs-source-dirs:
+      gen
+  build-depends:
+      aeson
+    , base >=4.7 && <5
+    , bytestring
+    , containers
+    , elm-bridge
+    , hashable
+    , mtl
+    , regex-compat
+    , struere
+    , text
+    , websockets
   default-language: Haskell2010
 
 test-suite struere-test
@@ -61,7 +103,15 @@ test-suite struere-test
       test
   ghc-options: -threaded -rtsopts -with-rtsopts=-N
   build-depends:
-      base >=4.7 && <5
+      aeson
+    , base >=4.7 && <5
+    , bytestring
+    , containers
+    , elm-bridge
+    , hashable
+    , mtl
+    , regex-compat
     , struere
     , text
+    , websockets
   default-language: Haskell2010

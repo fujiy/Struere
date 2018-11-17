@@ -22,6 +22,15 @@ description:         Please see the README on GitHub at <https://github.com/fuji
 dependencies:
 - base >= 4.7 && < 5
 - text
+- bytestring
+- mtl
+- containers
+- aeson
+- websockets
+# - elm-export
+- hashable
+- elm-bridge
+- regex-compat
 # - fixed-vector
 
 library:
@@ -39,6 +48,12 @@ executables:
     - struere
 
 tests:
+  generate:
+    main:                Generate.hs
+    source-dirs:         gen
+    dependencies:
+    - struere
+    other-modules: []
   struere-test:
     main:                Spec.hs
     source-dirs:         test
