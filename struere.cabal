@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: 690e6f8a9936f66a31773e33da3d1b19262f72bb52a479304b27503f9c97b27e
+-- hash: f9a10e59dd481100c3ff4d0f30be03dae65ef242cff272c568b41add31f8ed80
 
 name:           struere
 version:        0.1.0.0
@@ -27,16 +27,19 @@ source-repository head
 
 library
   exposed-modules:
-      Data.Struere
-      Data.Struere.Class
       Data.Struere.Editor
       Data.Struere.Editor.Brick
-      Data.Struere.Editor.Mode
+      Data.Struere.Editor.Carpenter
+      Data.Struere.Editor.Carpenter.Isomorphism
+      Data.Struere.Editor.Editable
+      Data.Struere.Editor.Mode.Haskell
+      Data.Struere.Editor.Mode.Major
       Data.Struere.Editor.Protocol
-      Data.Struere.Editor.Structure
+      Data.Struere.Editor.Struere
       Data.Struere.Editor.View
-      Data.Struere.Scaffold
-      Data.Struere.Structure
+      Data.Struere.Isomorphism
+      Data.Struere.Parser
+      Data.Struere.Structural
   other-modules:
       Paths_struere
   hs-source-dirs:
@@ -47,8 +50,11 @@ library
     , bytestring
     , containers
     , elm-bridge
-    , hashable
+    , haskell-src-exts
+    , hint
     , mtl
+    , nat
+    , partial-isomorphisms
     , regex-compat
     , text
     , websockets
@@ -67,8 +73,11 @@ executable struere-exe
     , bytestring
     , containers
     , elm-bridge
-    , hashable
+    , haskell-src-exts
+    , hint
     , mtl
+    , nat
+    , partial-isomorphisms
     , regex-compat
     , struere
     , text
@@ -86,8 +95,11 @@ test-suite generate
     , bytestring
     , containers
     , elm-bridge
-    , hashable
+    , haskell-src-exts
+    , hint
     , mtl
+    , nat
+    , partial-isomorphisms
     , regex-compat
     , struere
     , text
@@ -108,8 +120,11 @@ test-suite struere-test
     , bytestring
     , containers
     , elm-bridge
-    , hashable
+    , haskell-src-exts
+    , hint
     , mtl
+    , nat
+    , partial-isomorphisms
     , regex-compat
     , struere
     , text

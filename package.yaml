@@ -25,13 +25,16 @@ dependencies:
 - bytestring
 - mtl
 - containers
+- partial-isomorphisms
+- nat
+# - data-nat
+- hint
+- haskell-src-exts
 - aeson
 - websockets
 # - elm-export
-- hashable
 - elm-bridge
 - regex-compat
-# - fixed-vector
 
 library:
   source-dirs: src

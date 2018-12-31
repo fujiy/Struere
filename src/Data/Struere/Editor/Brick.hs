@@ -1,35 +1,40 @@
-{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE DeriveGeneric #-}
 
 module Data.Struere.Editor.Brick where
 
-import qualified Data.Text as T
-import           Data.Aeson       (FromJSON, ToJSON)
-import Data.Aeson.Types (defaultTaggedObject)
-import Elm.Derive
-import Elm.Module
+import           Data.Aeson   (FromJSON, ToJSON)
+import qualified Data.Text    as T
+import           GHC.Generics
 
 
 data Brick
-    = Hole
-    | Keyword T.Text
-    | Operator T.Text
-    | Array Int [Brick]
+    = Hole MetaInfo
+    | Empty
+    | Plane String
+    -- | Keyword T.Text
+    -- | Operator T.Text
+    -- | Cons Brick Brick
+    | Array [Brick]
     | Meta MetaInfo Brick
-    deriving (Show)
+    deriving (Show, Generic)
+
+instance ToJSON   Brick
+instance FromJSON Brick
 
 data MetaInfo = MetaInfo
     { cursor :: Bool }
-    deriving (Show)
+    deriving (Show, Generic)
 
-deriveBoth (defaultOptions { sumEncoding = defaultTaggedObject })
-    ''MetaInfo
+consBrick :: Brick -> Brick -> Brick
+Plane xs `consBrick` Plane ys = Plane $ xs ++ ys
+Empty    `consBrick` b        = b
+a        `consBrick` Empty    = a
 
+instance ToJSON   MetaInfo
+instance FromJSON MetaInfo
 
-deriveBoth (defaultOptions { sumEncoding = defaultTaggedObject })
-    ''Brick
-
--- instance ToJSON   Brick
--- instance FromJSON Brick
+emptyMeta :: MetaInfo
+emptyMeta = MetaInfo False
 
     -- | Cons  { level    :: Int
     --         , symbols  :: [T.Text]
