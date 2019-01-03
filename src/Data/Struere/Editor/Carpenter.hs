@@ -1,6 +1,3 @@
-{-# LANGUAGE DeriveGeneric #-}
-{-# LANGUAGE LambdaCase    #-}
-{-# LANGUAGE TupleSections #-}
 
 module Data.Struere.Editor.Carpenter where
 
@@ -11,75 +8,70 @@ import           Data.Maybe
 import           Prelude                      hiding (id, pure, (*>), (<$>),
                                                (<*), (<*>), (<|>))
 -- import           Data.Number.Nat
-import           Data.Aeson                   (FromJSON, ToJSON)
 import           Data.Dynamic
 import           Debug.Trace
-import           GHC.Generics
 
 import           Data.Struere.Editor.Brick
-import           Data.Struere.Editor.Protocol
+import qualified Data.Struere.Editor.Position as Pos
+import           Data.Struere.Editor.Util
 import           Data.Struere.Isomorphism
 import           Data.Struere.Structural
 -- import           Data.Struere.Viewer
 
 -- Positioned
 
-type Positioned a = [Target a]
 
-data Target a = Root a
-              | Sub Int (Positioned a)
-              deriving (Show)
+-- type Positioned a = [Target a]
 
-unconsRoot :: Positioned a -> ([a], Positioned a)
-unconsRoot = foldr
-    (\t (as, ss) -> case t of
-            Root a -> (a:as,     ss)
-            sub    -> (  as, sub:ss))
-    ([], [])
+-- data Target a = Root a
+--               | Sub Int (Positioned a)
+--               deriving (Show, Functor)
 
-splitSub :: Nat -> Positioned a -> (Positioned a, Positioned a)
-splitSub n = foldr
-    (\t (ls, rs) -> case t of
-            Root _                  -> (ls, rs)
-            Sub x p | x < fromNat n -> (Sub x p : ls, rs)
-                    | otherwise     -> (ls, Sub (x - fromNat n) p : rs))
-    ([], [])
+-- mapPos :: (a -> b) -> Positioned a -> Positioned b
+-- mapPos = fmap . fmap
 
-mergeSub :: Nat -> Positioned a -> Positioned a -> Positioned a
-mergeSub n ls rs = ls ++ map (shiftSub $ fromNat n) rs
+-- unconsRoot :: Positioned a -> ([a], Positioned a)
+-- unconsRoot = foldr
+--     (\t (as, ss) -> case t of
+--             Root a -> (a:as,     ss)
+--             sub    -> (  as, sub:ss))
+--     ([], [])
 
-singletonSub :: Positioned a -> Positioned a
-singletonSub [] = []
-singletonSub p  = [Sub 0 p]
+-- splitSub :: Nat -> Positioned a -> (Positioned a, Positioned a)
+-- splitSub n = foldr
+--     (\t (ls, rs) -> case t of
+--             Root _                  -> (ls, rs)
+--             Sub x p | x < fromNat n -> (Sub x p : ls, rs)
+--                     | otherwise     -> (ls, Sub (x - fromNat n) p : rs))
+--     ([], [])
 
-headSub :: Positioned a -> Positioned a
-headSub = (concat .) . mapMaybe $ \case
-    Sub 0 p -> Just p
-    _       -> Nothing
+-- mergeSub :: Nat -> Positioned a -> Positioned a -> Positioned a
+-- mergeSub n ls rs = ls ++ map (shiftSub $ fromNat n) rs
 
-shiftSub :: Int -> Target a -> Target a
-shiftSub n (Sub x p) = Sub (x + n) p
-shiftSub _ t         = t
+-- singletonSub :: Positioned a -> Positioned a
+-- singletonSub [] = []
+-- singletonSub p  = [Sub 0 p]
 
-enumerate :: Positioned a -> [(Position, a)]
-enumerate = concatMap $ \case
-    Root a  -> [(rootPos, a)]
-    Sub x p -> map (mapFst $ subPos x) $ enumerate p
+-- headSub :: Positioned a -> Positioned a
+-- headSub = (concat .) . mapMaybe $ \case
+--     Sub 0 p -> Just p
+--     _       -> Nothing
 
-mapFst :: (a -> c) -> (a, b) -> (c, b)
-mapFst f (a, b) = (f a, b)
--- History
+-- shiftSub :: Int -> Target a -> Target a
+-- shiftSub n (Sub x p) = Sub (x + n) p
+-- shiftSub _ t         = t
 
--- type History s = [Diff s]
+-- -- subs :: Positioned a -> [Positioned a]
+-- -- subs
 
--- data Diff s = Diff
---     { pos   :: [Int]
---     , value :: s
---     } deriving (Show, Generic)
+-- headPos :: Positioned a -> Target a
+-- headPos = head . headSub
 
 
--- instance ToJSON   a => ToJSON   (Diff a)
--- instance FromJSON a => FromJSON (Diff a)
+-- enumerate :: Positioned a -> [(Position, a)]
+-- enumerate = concatMap $ \case
+--     Root a  -> [(rootPos, a)]
+--     Sub x p -> map (mapFst $ subPos x) $ enumerate p
 
 
 -- Position
@@ -88,19 +80,18 @@ mapFst f (a, b) = (f a, b)
 
 -- Carpenter
 
-type Instrs = Positioned Instr
+type Instrs = Pos.Positioned Instr
 
-data Instr = IChar Char
-           | IDelete
+data Instr = IDelete
            | ISet Dynamic
            deriving (Show)
 
-type Bubbles = Positioned Bubble
+type Bubbles = Pos.Positioned Bubble
 
 data Bubble = Unaccepted
             | BDelete
 
-type BrickDiff = Positioned Brick
+type BrickDiff = Pos.Positioned Brick
 
 data Carpenter a = Carpenter
     { size    :: Nat
@@ -123,28 +114,30 @@ instance IsoFunctor Carpenter where
 instance ProductFunctor Carpenter where
     (<*>) = flip fix Nothing $ \next mab cp cq -> Carpenter
         { size = size cq + size cp
+
         , builder = \(a, b) -> do
                 (bd, cp') <- builder cp a
                 (be, cq') <- builder cq b
                 return (consBrick bd be, next (Just (a, b)) cp' cq')
-        , updater = \case
-                [] -> (mab, [], next mab cp cq)
-                is -> let (lis, ris)    = splitSub (size cp) is
-                          lis'          = applyIf (size cp <= 1) headSub lis
-                          ris'          = applyIf (size cq <= 1) headSub ris
-                          (ma, bd, cp') = updater cp lis'
-                          (mb, be, cq') = updater cq ris'
-                          mab'          = zipMaybe ma mb
-                          bd'           = applyIf (size cp <= 1) singletonSub bd
-                          be'           = applyIf (size cq <= 1) singletonSub be
-                      in  ( mab'
-                          , mergeBrickDiff (size cp) bd' be'
-                          , next mab' cp' cq'
-                          )
+
+        , updater = \is ->
+                if Pos.null is then (mab, mempty, next mab cp cq)
+                else let (lis, ris)    = Pos.split (size cp) is
+                         lis'          = applyIf (size cp <= 1) Pos.head lis
+                         ris'          = applyIf (size cq <= 1) Pos.head ris
+                         (ma, bd, cp') = updater cp lis'
+                         (mb, be, cq') = updater cq ris'
+                         mab'          = zipMaybe ma mb
+                         bd'           = applyIf (size cp <= 1) Pos.singleton bd
+                         be'           = applyIf (size cq <= 1) Pos.singleton be
+                     in  ( mab'
+                         , mergeBrickDiff (size cp) bd' be'
+                         , next mab' cp' cq'
+                         )
         }
 
 instance Alter Carpenter where
-    empty = Carpenter 0 (const Nothing) (const (Nothing, [], empty))
+    empty = Carpenter 0 (const Nothing) (const (Nothing, mempty, empty))
     -- cp@(Carpenter n bf uf) <|> cq@(Carpenter m bg ug)
     (<|>) = flip fix Nothing $ \next mab cp cq -> Carpenter
         { size    = size cp `max` size cq
@@ -152,27 +145,27 @@ instance Alter Carpenter where
                 (Just (ba, cp'), _      ) -> Just (ba, next (Just a) cp' cq )
                 (_,       Just (bb, cq')) -> Just (bb, next (Just a) cp  cq')
                 (Nothing, Nothing       ) -> Nothing
-        , updater = \case
-                [] -> (mab, [], cp <|> cq)
-                is -> let (ma, bd, cp') = updater cp is
-                          (mb, be, cq') = updater cq is
-                          mab'          = ma `mplus` mb
-                      in  (mab', bd ++ be, next mab' cp' cq')
+        , updater = \is ->
+                if Pos.null is then (mab, mempty, next mab cp cq)
+                else let (ma, bd, cp') = updater cp is
+                         (mb, be, cq') = updater cq is
+                         mab'          = ma `mplus` mb
+                     in  (mab', bd <> be, next mab' cp' cq')
         }
 
 instance Structural Carpenter where
     pure a = Carpenter
         { size    = 0
         , builder = \a' -> if a == a' then Just (Empty, pure a) else Nothing
-        , updater = const (Just a, [], pure a)
+        , updater = const (Just a, mempty, pure a)
         }
     char = flip fix Nothing $ \next mc -> Carpenter
         { size = 1
-        , builder = \c -> Just (Plane [c], next $ Just c)
-        , updater = \is -> case fst $ updates is of
-                NoChange -> (mc, [], next mc)
-                Set c    -> (Just c,  [Root $ Plane [c]], next $ Just c)
-                Delete   -> (Nothing, [], next Nothing)
+        , builder = \c -> Just (Plane c, next $ Just c)
+        , updater = \is -> case changes is of
+                NoChange -> (mc, mempty, next mc)
+                Set c    -> (Just c,  Pos.root (Plane c), next $ Just c)
+                Delete   -> (Nothing, mempty, next Nothing)
         }
     sub l = flip fix Nothing $ \next ma cp -> Carpenter
         { size = 1
@@ -180,14 +173,15 @@ instance Structural Carpenter where
                 (br, cp') <- builder cp a
                 return (br, next (Just a) cp')
         , updater = \is ->
-                let (u, sis) = updates is
-                in  case u of
-                    NoChange -> let (ma', bd, cp') = updater cp sis
-                                 in  (ma', bd, next ma' cp')
-                    Set a     -> fromMaybe (ma, [], next ma cp) $ do
+                case changes is of
+                    NoChange ->
+                        let sis            = applyIf (size cp <= 1) Pos.head is
+                            (ma', bd, cp') = updater cp sis
+                        in  (ma', bd, next ma' cp')
+                    Set a    -> fromMaybe (ma, mempty, next ma cp) $ do
                         (br, cp') <- builder cp a
-                        return (Just a, [Root br], next (Just a) cp')
-                    Delete    -> (Nothing, [], next Nothing cp)
+                        return (Just a, Pos.root br, next (Just a) cp')
+                    Delete   -> (Nothing, mempty, next Nothing cp)
         }
 
 data Changes a = NoChange
@@ -195,17 +189,16 @@ data Changes a = NoChange
                | Delete
                deriving (Show)
 
-updates :: Typeable a => Instrs -> (Changes a, Instrs)
-updates is = let (ris, sis) = unconsRoot is
-           in  (, sis) $ case ris of
-               IDelete : _ -> Delete
-               -- ISet d  : _ -> maybe NoChange Set $ fromDynamic d
-               ISet d  : _ -> maybe NoChange Set $ fromDynamic d
-               _           -> NoChange
+changes :: Typeable a => Instrs -> Changes a
+changes is = case Pos.roots is of
+    IDelete : _ -> Delete
+    -- ISet d  : _ -> maybe NoChange Set $ fromDynamic d
+    ISet d  : _ -> maybe NoChange Set $ fromDynamic d
+    _           -> NoChange
 
 mergeBrickDiff :: Nat -> BrickDiff -> BrickDiff -> BrickDiff
-mergeBrickDiff n [Root (Plane xs)] [Root (Plane ys)] = [Root $ Plane $ xs ++ ys]
-mergeBrickDiff n x y                                 = mergeSub n x y
+-- mergeBrickDiff n [Root (Plane xs)] [Root (Plane ys)] = [Root $ Plane $ xs ++ ys]
+mergeBrickDiff n x y                                 = Pos.merge n x y
 
 -- Utilities
 
@@ -224,35 +217,6 @@ plusMaybe _ x        Nothing  = x
 applyIf :: Bool -> (a -> a) -> a -> a
 applyIf True  f a = f a
 applyIf False _ a = a
-
-
-data Nat = Zero | Succ Nat
-    deriving (Eq, Ord)
-
-instance Num Nat where
-    (+) n  = foldNat n Succ
-    (*) n  = foldNat 0 (+ n)
-    negate = undefined
-    abs    = id
-    signum = const 1
-    fromInteger 0 = Zero
-    fromInteger x | x > 0 = Succ $ fromInteger $ x - 1
-
-nat :: r -> (Nat -> r) -> Nat -> r
-nat z s Zero     = z
-nat z s (Succ n) = s n
-
-foldNat :: r -> (r -> r) -> Nat -> r
-foldNat z s = nat z (s . foldNat z s)
-
-fromNat :: Num n => Nat -> n
-fromNat Zero     = 0
-fromNat (Succ n) = fromNat n + 1
-
-natLT :: Nat -> Nat -> Bool
-natLT Zero     (Succ _) = True
-natLT (Succ n) (Succ m) = natLT n m
-natLT _        _        = False
 
 
 -- data Builder a = Builder (a -> Maybe (Carpenter a))

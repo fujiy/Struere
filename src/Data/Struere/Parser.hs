@@ -2,7 +2,7 @@
 module Data.Struere.Parser where
 
 import           Control.Monad
-import qualified Data.Text as T
+import qualified Data.Text                as T
 
 import           Data.Struere.Isomorphism
 import           Data.Struere.Structural

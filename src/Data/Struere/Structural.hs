@@ -2,11 +2,12 @@
 module Data.Struere.Structural where
 
 
-import           Prelude hiding (id, (.), (<$>), pure, (<*>), (<*), (*>), (<|>))
 import           Control.Category
-import           Data.Typeable
+import qualified Data.Char                as C
 import           Data.Maybe
-import qualified Data.Char as C
+import           Data.Typeable
+import           Prelude                  hiding (id, pure, (*>), (.), (<$>),
+                                           (<*), (<*>), (<|>))
 
 import           Data.Struere.Isomorphism
 
@@ -31,10 +32,6 @@ class (IsoFunctor f, ProductFunctor f, Alter f) => Structural f where
 
 many :: Structural f => f a -> f [a]
 many p = cons <$> p <*> many p
-     <|> nil <$> pure ()
-
-many' :: (Structural f, Eq a) => f a -> f [a]
-many' p = ( cons <$> p <*> many' p )
      <|> nil <$> pure ()
 
 many1 :: Structural f => f a -> f [a]

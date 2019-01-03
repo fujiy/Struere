@@ -2,36 +2,32 @@
 
 module Data.Struere.Editor.Brick where
 
-import           Data.Aeson   (FromJSON, ToJSON)
-import qualified Data.Text    as T
-import           GHC.Generics
+import qualified Data.Text as T
 
 
 data Brick
     = Hole MetaInfo
     | Empty
-    | Plane String
+    | Plane Char
     -- | Keyword T.Text
     -- | Operator T.Text
     -- | Cons Brick Brick
     | Array [Brick]
     | Meta MetaInfo Brick
-    deriving (Show, Generic)
-
-instance ToJSON   Brick
-instance FromJSON Brick
 
 data MetaInfo = MetaInfo
     { cursor :: Bool }
-    deriving (Show, Generic)
+    deriving (Show )
 
 consBrick :: Brick -> Brick -> Brick
-Plane xs `consBrick` Plane ys = Plane $ xs ++ ys
+-- Plane xs `consBrick` Plane ys = Plane $ xs ++ ys
 Empty    `consBrick` b        = b
 a        `consBrick` Empty    = a
+Array xs `consBrick` Array ys = Array $ xs ++ ys
+Array xs `consBrick` b        = Array $ xs ++ [b]
+a        `consBrick` Array ys = Array $ a:ys
+a        `consBrick` b        = Array [a, b]
 
-instance ToJSON   MetaInfo
-instance FromJSON MetaInfo
 
 emptyMeta :: MetaInfo
 emptyMeta = MetaInfo False

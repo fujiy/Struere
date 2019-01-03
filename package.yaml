@@ -26,15 +26,11 @@ dependencies:
 - mtl
 - containers
 - partial-isomorphisms
-- nat
+- threepenny-gui
+- keycode
 # - data-nat
 - hint
 - haskell-src-exts
-- aeson
-- websockets
-# - elm-export
-- elm-bridge
-- regex-compat
 
 library:
   source-dirs: src
@@ -51,12 +47,6 @@ executables:
     - struere
 
 tests:
-  generate:
-    main:                Generate.hs
-    source-dirs:         gen
-    dependencies:
-    - struere
-    other-modules: []
   struere-test:
     main:                Spec.hs
     source-dirs:         test

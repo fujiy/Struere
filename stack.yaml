@@ -39,8 +39,6 @@ packages:
 # using the same syntax as the packages field.
 # (e.g., acme-missiles-0.3)
 extra-deps:
-- nat-0.3
-- elm-bridge-0.5.0
 
 # Override default flag values for local packages and extra-deps
 # flags: {}
@@ -65,3 +63,4 @@ extra-deps:
 #
 # Allow a newer minor version of GHC than the snapshot specifies
 # compiler-check: newer-minor
+# allow-newer: true

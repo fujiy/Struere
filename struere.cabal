@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: f9a10e59dd481100c3ff4d0f30be03dae65ef242cff272c568b41add31f8ed80
+-- hash: a302f7028c5e076dcc94a046811adc4b0b7f10775ec8c57990a5db8169967397
 
 name:           struere
 version:        0.1.0.0
@@ -30,34 +30,33 @@ library
       Data.Struere.Editor
       Data.Struere.Editor.Brick
       Data.Struere.Editor.Carpenter
-      Data.Struere.Editor.Carpenter.Isomorphism
       Data.Struere.Editor.Editable
       Data.Struere.Editor.Mode.Haskell
       Data.Struere.Editor.Mode.Major
-      Data.Struere.Editor.Protocol
+      Data.Struere.Editor.Position
       Data.Struere.Editor.Struere
+      Data.Struere.Editor.Util
       Data.Struere.Editor.View
+      Data.Struere.Editor.Viewer
       Data.Struere.Isomorphism
       Data.Struere.Parser
+      Data.Struere.Scaffold
       Data.Struere.Structural
   other-modules:
       Paths_struere
   hs-source-dirs:
       src
   build-depends:
-      aeson
-    , base >=4.7 && <5
+      base >=4.7 && <5
     , bytestring
     , containers
-    , elm-bridge
     , haskell-src-exts
     , hint
+    , keycode
     , mtl
-    , nat
     , partial-isomorphisms
-    , regex-compat
     , text
-    , websockets
+    , threepenny-gui
   default-language: Haskell2010
 
 executable struere-exe
@@ -68,42 +67,17 @@ executable struere-exe
       app
   ghc-options: -threaded -rtsopts -with-rtsopts=-N
   build-depends:
-      aeson
-    , base >=4.7 && <5
+      base >=4.7 && <5
     , bytestring
     , containers
-    , elm-bridge
     , haskell-src-exts
     , hint
+    , keycode
     , mtl
-    , nat
     , partial-isomorphisms
-    , regex-compat
     , struere
     , text
-    , websockets
-  default-language: Haskell2010
-
-test-suite generate
-  type: exitcode-stdio-1.0
-  main-is: Generate.hs
-  hs-source-dirs:
-      gen
-  build-depends:
-      aeson
-    , base >=4.7 && <5
-    , bytestring
-    , containers
-    , elm-bridge
-    , haskell-src-exts
-    , hint
-    , mtl
-    , nat
-    , partial-isomorphisms
-    , regex-compat
-    , struere
-    , text
-    , websockets
+    , threepenny-gui
   default-language: Haskell2010
 
 test-suite struere-test
@@ -115,18 +89,15 @@ test-suite struere-test
       test
   ghc-options: -threaded -rtsopts -with-rtsopts=-N
   build-depends:
-      aeson
-    , base >=4.7 && <5
+      base >=4.7 && <5
     , bytestring
     , containers
-    , elm-bridge
     , haskell-src-exts
     , hint
+    , keycode
     , mtl
-    , nat
     , partial-isomorphisms
-    , regex-compat
     , struere
     , text
-    , websockets
+    , threepenny-gui
   default-language: Haskell2010
