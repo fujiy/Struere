@@ -45,7 +45,7 @@ setup window = do
     let key = keypress body
 
 
-    button <- UI.button
+    button <- UI.new
 
     str <- accumB "" $ (:) <$> key
 
@@ -60,26 +60,34 @@ bufferUI :: Window -> UI Element
 bufferUI window = do
     buf <- UI.new
 
-    key <- keypress <$> getBody window
+    ic <- keypress <$> getBody window
+    kc <- keydown  <$> getBody window
 
     let Just (bu, cp) = builder test test1
+        initc = Context (Pos.positioned (Pos.fromList [0, 1]) ()) cp
+
+        input = unionWith const (InputChar <$> ic) (KeyCode <$> kc)
 
     -- editorB <- accumB (Editor $ Buffer "test" cp) never
     --     :: UI (Behavior Editor)
 
-    rec cb <- do
-            let initc = Pos.positioned [0, 1] ()
-                is = instrs (fst <$> cb) key
-                update i (context, b) =
-                    let (ma, d, cp') = updater (carpenter context) i
-                    in  ( context { carpenter = cp' }
-                        , maybe Empty id $ ma >>= runViewer test )
-            accumB (Context initc cp, bu) $ update <$> is
-                :: UI (Behavior (Context, Brick))
+    -- rec cb <- do
+    --         let is = instrs (fst <$> cb) key
+    --             update i (context, b) =
+    --                 let (ma, d, cp') = updater (carpenter context) i
+    --                 in  ( context { carpenter = cp' }
+    --                     , maybe Empty id $ runViewer test <$> ma )
+    --         accumB (initc, bu) $ update <$> is
+    --             :: UI (Behavior (Context, Brick))
 
     -- brick <- brick . snd <$> cb
 
-    onChanges cb $ \(c, a) -> do
+    initb <- brick (carets initc) bu
+    return buf # set UI.children [initb]
+
+    mainB <- mainAccum initc input
+
+    onChanges mainB $ \(c, a) -> do
         b <- brick (carets c) a
         return buf # set UI.children [b]
 
@@ -87,6 +95,30 @@ bufferUI window = do
 
     return buf
 
+mainAccum :: Context -> Event Input -> UI (Behavior (Context, Brick))
+mainAccum initc charE =
+    accumB (initc, Empty) $ (`fmap` charE) $ \input (context, b) ->
+    case input of
+        KeyCode c -> case Key.keyCodeLookup c of
+            Key.ArrowUp    -> (moveCarets (Pos.up 1)   context, b)
+            Key.ArrowDown  -> (moveCarets (Pos.down 1) context, b)
+            Key.ArrowRight -> (moveCarets (Pos.next 1) context, b)
+            Key.ArrowLeft  -> (moveCarets (Pos.prev 1) context, b)
+            _              -> (context, b)
+        InputChar c ->
+            let is = const (ISet $ toDyn c) <$> carets context
+                (ma, d, cp) = updater (carpenter context) is
+                b'          = maybe Empty id $ runViewer test <$> ma
+             in  (context { carpenter = cp } , b')
+
+
+moveCarets :: Pos.Path -> Context -> Context
+moveCarets p context =
+    let cs  = carets context
+        mcs = Pos.move p cs
+        rcs = railTop (carpenter context) mcs
+    in trace (unlines $ show cs : show mcs : show rcs : [])
+        context { carets = rcs }
 
 instrs :: Behavior Context -> Event Char -> Event Instrs
 instrs contextB charE =
@@ -101,13 +133,13 @@ brick c b = do
     -- Plane x -> mapM (\c -> UI.span # set UI.text [c]) x
         Plane c  -> UI.span # set UI.text [c]
         Array xs -> do
-            bs <- mapM (brick c) xs
+            bs <- zipWithM brick (Pos.listSubInf c) xs
             UI.new # set UI.children bs
-        Empty    -> UI.new
+        Empty    -> UI.span # set UI.text "<empty>"
     unless (null $ Pos.roots c) $ void $
         return el
-        # set UI.background "black"
-        # set UI.color "white"
+        # set style [ ("background", "black")
+                    , ("color",      "white")]
     return el
 
 

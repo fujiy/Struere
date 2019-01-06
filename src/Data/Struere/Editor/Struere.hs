@@ -1,3 +1,4 @@
+{-# LANGUAGE DeriveFunctor #-}
 
 module Data.Struere.Editor.Struere where
 
@@ -10,27 +11,31 @@ import           Data.Struere.Editor.Util
 -- import           Data.Struere.Editor.View
 
 
+import           Data.Struere.Editor.Carpenter
 import           Data.Struere.Editor.Mode.Haskell
 
 -- data Editor = Editor
 --     { buffer :: Buffer
 --     }
 
+data Input = InputChar Char
+           | KeyCode Int
+    deriving (Eq, Show)
+
 data Context = Context
     { carets    :: Carets
     , carpenter :: Carpenter Test
     }
 
-type Carets = Pos.Positioned ()
 
 -- data Buffer = Buffer
 --     { name      :: T.Text
 --     , carpenter :: Carpenter Test
 --     }
 
--- newtype Struere a = Struere
---     { runStruere :: Context -> Editor -> (a, Context, Editor) }
---     deriving (Functor)
+newtype Struere a = Struere
+    { runStruere :: Context -> (a, Context) }
+    deriving (Functor)
 
 -- instance Applicative Struere where
 --     pure a = Struere $ \c e -> (a, c, e)

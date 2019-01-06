@@ -14,6 +14,7 @@ data Brick
     -- | Cons Brick Brick
     | Array [Brick]
     | Meta MetaInfo Brick
+    deriving (Show)
 
 data MetaInfo = MetaInfo
     { cursor :: Bool }
@@ -23,10 +24,15 @@ consBrick :: Brick -> Brick -> Brick
 -- Plane xs `consBrick` Plane ys = Plane $ xs ++ ys
 Empty    `consBrick` b        = b
 a        `consBrick` Empty    = a
-Array xs `consBrick` Array ys = Array $ xs ++ ys
-Array xs `consBrick` b        = Array $ xs ++ [b]
-a        `consBrick` Array ys = Array $ a:ys
 a        `consBrick` b        = Array [a, b]
+
+mergeArray :: Brick -> Brick -> Brick
+Empty    `mergeArray` b        = b
+a        `mergeArray` Empty    = a
+Array xs `mergeArray` Array ys = Array $ xs ++ ys
+Array xs `mergeArray` b        = Array $ xs ++ [b]
+a        `mergeArray` Array ys = Array $ a:ys
+a        `mergeArray` b        = Array [a, b]
 
 
 emptyMeta :: MetaInfo

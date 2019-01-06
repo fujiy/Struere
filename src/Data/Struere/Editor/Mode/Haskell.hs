@@ -1,6 +1,7 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE KindSignatures    #-}
 {-# LANGUAGE TemplateHaskell   #-}
+{-# LANGUAGE TupleSections     #-}
 
 module Data.Struere.Editor.Mode.Haskell where
 
@@ -17,11 +18,14 @@ import           Language.Haskell.Exts.SrcLoc
 import           Language.Haskell.Exts.Syntax
 -- import           Language.Haskell.Exts.SimpleComments
 
+import           Data.Struere.Parser
 import           Data.Struere.Structural
 -- import           Data.Struere.Scaffold
 -- import           Data.Struere.Viewer
 import           Data.Struere.Editor.Editable
 import           Data.Struere.Isomorphism
+
+import           Debug.Trace
 
 
 defineIsomorphisms ''Decl
@@ -35,11 +39,12 @@ defineIsomorphisms ''QName
 type HaskellFile = Module Info
 type Info = (SrcSpanInfo, [Comment])
 
-type Test = Name Info
+type Test = Exp Info
 
-test :: Structural f => f (Name Info)
-test = name
-test1 = name1
+test :: Structural f => f Test
+test = expr
+test1 :: Test
+Right test1 = traceShowId $ runParser test $ T.pack "abcd"
 
 instance Editable (Module (SrcSpanInfo, [Comment])) where
     structure = modulestr
@@ -74,8 +79,11 @@ matchc = match <$> noInfo <*> empty <*> pure [] <*> rhs <*> pure Nothing
 rhs :: Structural f => f (Rhs Info)
 rhs = unGuardedRhs <$> noInfo <*> expr
 
-expr :: Structural f => f (Exp Info)
-expr = var <$> noInfo <*> qname
+
+expr, fexpr, aexpr :: Structural f => f (Exp Info)
+expr = fexpr
+fexpr = aexpr
+aexpr = var <$> noInfo <*> qname
 
 qname :: Structural f => f (QName Info)
 qname = unQual <$> noInfo <*> name
@@ -88,4 +96,4 @@ identifier = sub defaultLevel $ cons <$> letter <*> many alphaNum
 
 
 name1 :: Name Info
-name1 = Ident (noSrcSpan, []) "xyz"
+name1 = Ident (noSrcSpan, []) "abcdef"
