@@ -1,16 +1,16 @@
 {-# LANGUAGE DeriveFunctor #-}
 
-module Data.Struere.Editor.Position where
+module Data.Struere.Position where
 
 
-import           Data.IntMap              (IntMap)
-import qualified Data.IntMap.Strict       as IntMap
+import           Data.IntMap        (IntMap)
+import qualified Data.IntMap.Strict as IntMap
 import           Data.Maybe
-import           Data.Sequence            (Seq)
-import qualified Data.Sequence            as Seq
-import           Prelude                  hiding (null)
+import           Data.Sequence      (Seq)
+import qualified Data.Sequence      as Seq
+import           Prelude            hiding (null)
 
-import           Data.Struere.Editor.Util
+import           Data.Struere.Util
 
 
 -- |Position
@@ -48,6 +48,9 @@ roots (Positioned rs _) = rs
 subs :: Positioned a -> IntMap (Positioned a)
 subs (Positioned _ m) = m
 
+exceptRoots :: Positioned a -> Positioned a
+exceptRoots (Positioned _ m) = Positioned [] m
+
 head :: Positioned a -> Positioned a
 head (Positioned _ m) = IntMap.findWithDefault mempty 0 m
 
@@ -76,7 +79,7 @@ split x (Positioned _ m) =
 merge :: Int -> Positioned a -> Positioned a -> Positioned a
 merge x (Positioned lr lm) (Positioned rr rm) =
     Positioned (lr <> rr)
-    $ IntMap.union lm (IntMap.mapKeysMonotonic (+ x) rm)
+    $ IntMap.unionWith (<>) lm (IntMap.mapKeysMonotonic (+ x) rm)
 
 shift :: Int -> Positioned a -> Positioned a
 shift n (Positioned r m) = Positioned r $ IntMap.mapKeysMonotonic (+ n) m
@@ -185,3 +188,7 @@ up x | x >= 0    = Path x 0 root
 down :: Int -> Path
 down x | x >= 0    = Path 0 0 (Seq.replicate x 0)
        | otherwise = up $ negate x
+
+-- Caret
+
+type Carets = Positioned ()

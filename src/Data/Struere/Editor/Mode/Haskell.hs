@@ -7,8 +7,9 @@ module Data.Struere.Editor.Mode.Haskell where
 
 import qualified Data.Text                        as T
 import           GHC.Generics
-import           Prelude                          hiding (pure, (*>), (<$>),
-                                                   (<*), (<*>), (<|>))
+import           Prelude                          hiding (foldl1, pure, (*>),
+                                                   (<$), (<$>), (<*), (<*>),
+                                                   (<|>))
 
 import           Language.Haskell.Exts.Comments
 import           Language.Haskell.Exts.ExactPrint
@@ -19,7 +20,7 @@ import           Language.Haskell.Exts.Syntax
 -- import           Language.Haskell.Exts.SimpleComments
 
 import           Data.Struere.Parser
-import           Data.Struere.Structural
+import           Data.Struere.Syntax
 -- import           Data.Struere.Scaffold
 -- import           Data.Struere.Viewer
 import           Data.Struere.Editor.Editable
@@ -33,17 +34,21 @@ defineIsomorphisms ''Match
 defineIsomorphisms ''Name
 defineIsomorphisms ''Rhs
 var = $(constructorIso 'Var)
+app = $(constructorIso 'App)
 defineIsomorphisms ''QName
 
 
 type HaskellFile = Module Info
 type Info = (SrcSpanInfo, [Comment])
 
-type Test = Exp Info
+type Test = Name Info
+-- type Test = String
 
-test :: Structural f => f Test
-test = expr
+test :: Syntax f => f Test
+test = name
+-- test = many alphaNum
 test1 :: Test
+-- test1 = "abc"
 Right test1 = traceShowId $ runParser test $ T.pack "abcd"
 
 instance Editable (Module (SrcSpanInfo, [Comment])) where
@@ -56,7 +61,7 @@ instance Editable (Module (SrcSpanInfo, [Comment])) where
     printer mod =
         T.pack . exactPrint (fmap fst mod) $ snd (ann mod)
 
-modulestr :: Structural f => f (Module (SrcSpanInfo, [Comment]))
+modulestr :: Syntax f => f (Module (SrcSpanInfo, [Comment]))
 modulestr = moduleiso <$> many decl
 
 moduleiso :: Iso [Decl (SrcSpanInfo, [Comment])]
@@ -67,33 +72,90 @@ moduleiso = isomorphism to from
     from (Module _ _ _ _ decls) = Just decls
     from _                      = Nothing
 
-noInfo :: Structural f => f Info
+noInfo :: Syntax f => f Info
 noInfo = pure (noSrcSpan, [])
 
-decl :: Structural f => f (Decl Info)
+decl :: Syntax f => f (Decl Info)
 decl = funBind <$> noInfo <*> many1 matchc
 
-matchc :: Structural f => f (Match Info)
+matchc :: Syntax f => f (Match Info)
 matchc = match <$> noInfo <*> empty <*> pure [] <*> rhs <*> pure Nothing
 
-rhs :: Structural f => f (Rhs Info)
+rhs :: Syntax f => f (Rhs Info)
 rhs = unGuardedRhs <$> noInfo <*> expr
 
 
-expr, fexpr, aexpr :: Structural f => f (Exp Info)
+expr, fexpr, aexpr :: Syntax f => f (Exp Info)
 expr = fexpr
-fexpr = aexpr
+fexpr = foldl1 (app `pap'` (noSrcSpan, [])) <$> many1 aexpr
 aexpr = var <$> noInfo <*> qname
 
-qname :: Structural f => f (QName Info)
+qname :: Syntax f => f (QName Info)
 qname = unQual <$> noInfo <*> name
 
-name :: Structural f => f (Name Info)
-name = ident <$> noInfo <*> identifier
+name :: Syntax f => f (Name Info)
+name = ident <$> noInfo <*> identifier <* spaces
 
-identifier :: Structural f => f String
-identifier = sub defaultLevel $ cons <$> letter <*> many alphaNum
+identifier :: Syntax f => f String
+identifier = cons <$> letter <*> many alphaNum
+             <?> "identifier"
 
 
 name1 :: Name Info
 name1 = Ident (noSrcSpan, []) "abcdef"
+
+
+sepBy :: Syntax f => f () -> f a -> f [a]
+sepBy = undefined
+
+-- {-
+-- BNF
+
+-- value   ::= object | array | string | number | bool | 'null'
+-- object  ::= '{' members '}'
+-- members ::= | member (',' members)*
+-- member  ::= string ':' value
+-- array   ::= '[' values ']'
+-- values  ::= | value (',' value)*
+-- bool    ::= 'true' | 'false'
+-- string  ::= '"' (character)* '"'
+-- -}
+
+-- data JSValue = JSObject [(String, JSValue)]
+--              | JSArray [JSValue]
+--              | JSString String
+--              | JSNumber Float
+--              | JSBool Bool
+--              | JSNull
+
+-- defineIsomorphisms ''JSValue
+
+-- value   :: Syntax f => f JSValue
+-- value   = jSObject <$> object
+--       <|> jSArray  <$> array
+--       <|> jSString <$> string
+--       <|> jSNumber <$> number
+--       <|> jSBool   <$> bool
+--       <|> JSNull   <$  keyword "null"
+
+-- object  :: Syntax f => f [(String, JSValue)]
+-- object  = symbol "{" *> members <* symbol "}"
+
+-- members :: Syntax f => f [(String, JSValue)]
+-- members = sepBy (symbol ",") member
+
+-- member  :: Syntax f => f (String, JSValue)
+-- member  = string <*> symbol ":" *> value
+
+-- array   :: Syntax f => f [JSValue]
+-- array   = symbol "[" *> values <* symbol "]"
+
+-- values  :: Syntax f => f [JSValue]
+-- values  = sepBy (symbol ",") value
+
+-- bool    :: Syntax f => f Bool
+-- bool    = True  <$ symbol "true"
+--       <|> False <$ symbol "false"
+
+-- string  :: Syntax f => f String
+-- string  = symbol "\"" *> many char <* symbol "\""

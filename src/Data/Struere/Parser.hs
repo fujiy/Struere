@@ -4,8 +4,8 @@ module Data.Struere.Parser where
 import           Control.Monad
 import qualified Data.Text                as T
 
-import           Data.Struere.Isomorphism
-import           Data.Struere.Structural
+import           Data.Struere.Isomorphism hiding ((.))
+import           Data.Struere.Syntax
 
 newtype Parser a = Parser (T.Text -> Maybe (a, T.Text))
 
@@ -28,7 +28,7 @@ instance Alter Parser where
         = Parser $ \s -> p s `mplus` q s
     empty = Parser $ const Nothing
 
-instance Structural Parser where
+instance Syntax Parser where
     pure a = Parser $ \s -> Just (a, s)
     char   = Parser T.uncons
 

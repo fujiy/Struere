@@ -1,18 +1,20 @@
 {-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE RankNTypes    #-}
 
 module Data.Struere.Editor.Struere where
 
 import           Control.Monad.State
 import qualified Data.Text                        as T
 
-import           Data.Struere.Editor.Carpenter
-import qualified Data.Struere.Editor.Position     as Pos
-import           Data.Struere.Editor.Util
+import qualified Data.Struere.Position            as Pos
+import           Data.Struere.Util
 -- import           Data.Struere.Editor.View
 
 
 import           Data.Struere.Editor.Carpenter
 import           Data.Struere.Editor.Mode.Haskell
+import           Data.Struere.Struct
+import           Data.Struere.Syntax
 
 -- data Editor = Editor
 --     { buffer :: Buffer
@@ -23,8 +25,11 @@ data Input = InputChar Char
     deriving (Eq, Show)
 
 data Context = Context
-    { carets    :: Carets
-    , carpenter :: Carpenter Test
+    { carets  :: Carets
+    , struct  :: Struct
+    , value   :: Test
+    , updater :: Updater Test
+    , syntax  :: forall f. Syntax f => f Test
     }
 
 

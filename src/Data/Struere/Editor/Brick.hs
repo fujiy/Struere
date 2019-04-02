@@ -8,7 +8,7 @@ import qualified Data.Text as T
 data Brick
     = Hole MetaInfo
     | Empty
-    | Plane Char
+    | Token Char
     -- | Keyword T.Text
     -- | Operator T.Text
     -- | Cons Brick Brick

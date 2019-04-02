@@ -1,5 +1,7 @@
 
-module Data.Struere.Editor.Util where
+module Data.Struere.Util where
+
+import           Control.Monad
 
 -- Nat
 
@@ -41,3 +43,22 @@ mapFst f (a, b) = (f a, b)
 applyWhen :: Bool -> (a -> a) -> a -> a
 applyWhen True  f a = f a
 applyWhen False _ a = a
+
+applyUnless :: Bool -> (a -> a) -> a -> a
+applyUnless False f a = f a
+applyUnless True  _ a = a
+
+zipMaybe :: Maybe a -> Maybe b -> Maybe (a, b)
+zipMaybe = liftM2 (,)
+
+unzipMaybe               :: Maybe (a, b) -> (Maybe a, Maybe b)
+unzipMaybe Nothing       = (Nothing, Nothing)
+unzipMaybe (Just (a, b)) = (Just a, Just b)
+
+plusMaybe :: (a -> a -> a) -> Maybe a -> Maybe a -> Maybe a
+plusMaybe f (Just x) (Just y) = Just $ f x y
+plusMaybe _ Nothing   y       = y
+plusMaybe _ x        Nothing  = x
+
+fmapFst :: Functor f => (a -> c) -> f (a, b) -> f (c, b)
+fmapFst f = fmap $ mapFst f

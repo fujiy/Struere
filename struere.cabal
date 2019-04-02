@@ -4,7 +4,7 @@ cabal-version: 1.12
 --
 -- see: https://github.com/sol/hpack
 --
--- hash: a302f7028c5e076dcc94a046811adc4b0b7f10775ec8c57990a5db8169967397
+-- hash: 440b78c9842773e5022680a27ee23562aafa8f625af854ac10ccbf42bea7e177
 
 name:           struere
 version:        0.1.0.0
@@ -33,15 +33,15 @@ library
       Data.Struere.Editor.Editable
       Data.Struere.Editor.Mode.Haskell
       Data.Struere.Editor.Mode.Major
-      Data.Struere.Editor.Position
+      Data.Struere.Editor.Renderer
       Data.Struere.Editor.Struere
-      Data.Struere.Editor.Util
-      Data.Struere.Editor.View
-      Data.Struere.Editor.Viewer
       Data.Struere.Isomorphism
       Data.Struere.Parser
+      Data.Struere.Position
       Data.Struere.Scaffold
-      Data.Struere.Structural
+      Data.Struere.Struct
+      Data.Struere.Syntax
+      Data.Struere.Util
   other-modules:
       Paths_struere
   hs-source-dirs:
@@ -50,6 +50,7 @@ library
       base >=4.7 && <5
     , bytestring
     , containers
+    , data-reify
     , haskell-src-exts
     , hint
     , keycode
@@ -57,6 +58,7 @@ library
     , partial-isomorphisms
     , text
     , threepenny-gui
+    , transformers
   default-language: Haskell2010
 
 executable struere-exe
@@ -70,6 +72,7 @@ executable struere-exe
       base >=4.7 && <5
     , bytestring
     , containers
+    , data-reify
     , haskell-src-exts
     , hint
     , keycode
@@ -78,6 +81,7 @@ executable struere-exe
     , struere
     , text
     , threepenny-gui
+    , transformers
   default-language: Haskell2010
 
 test-suite struere-test
@@ -92,6 +96,7 @@ test-suite struere-test
       base >=4.7 && <5
     , bytestring
     , containers
+    , data-reify
     , haskell-src-exts
     , hint
     , keycode
@@ -100,4 +105,5 @@ test-suite struere-test
     , struere
     , text
     , threepenny-gui
+    , transformers
   default-language: Haskell2010

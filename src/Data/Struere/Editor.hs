@@ -10,29 +10,37 @@ import           Control.Monad
 import qualified Data.ByteString.Lazy             as BS
 import           Data.Char
 import           Data.Dynamic
+import           Data.Maybe
+import           Data.Reify
 import qualified Data.Text                        as T
 import           Debug.Trace
 import           Prelude                          hiding (pure, (<$>), (<*>))
 import qualified Web.KeyCode                      as Key
 
 import qualified Graphics.UI.Threepenny           as UI
-import           Graphics.UI.Threepenny.Core
+import           Graphics.UI.Threepenny.Core      hiding (value)
 import           Graphics.UI.Threepenny.Events
 
 
 import           Data.Struere.Editor.Brick
 import           Data.Struere.Editor.Carpenter
 import           Data.Struere.Editor.Editable
-import qualified Data.Struere.Editor.Position     as Pos
+import           Data.Struere.Editor.Renderer
 import           Data.Struere.Editor.Struere
-import           Data.Struere.Editor.Util
-import           Data.Struere.Editor.Viewer
-import           Data.Struere.Structural
+import qualified Data.Struere.Position            as Pos
+import           Data.Struere.Struct
+import           Data.Struere.Syntax
+import           Data.Struere.Util
 
 import           Data.Struere.Editor.Mode.Haskell
 
 main :: IO ()
 main = do
+
+    -- r <- reify (test :: Archivist Radiographer Test)
+    -- putStrLn $ unlines $ map show $ fst r
+    -- putStrLn $ snd r
+    -- print =<< reify' test
     startGUI defaultConfig setup
 
 
@@ -63,84 +71,109 @@ bufferUI window = do
     ic <- keypress <$> getBody window
     kc <- keydown  <$> getBody window
 
-    let Just (bu, cp) = builder test test1
-        initc = Context (Pos.positioned (Pos.fromList [0, 1]) ()) cp
+    let Just up = builder test test1
+        Just st = xray test test1
+        cs      = fromPosition st (Pos.fromList [0, 1]) InsertCaret
+        initc   = Context cs st test1 up test
+        Just iui = render test (carets initc) test1
 
-        input = unionWith const (InputChar <$> ic) (KeyCode <$> kc)
+        input   = unionWith const (InputChar <$> ic) (KeyCode <$> kc)
 
-    -- editorB <- accumB (Editor $ Buffer "test" cp) never
+
+    -- editorB <- accumB (Editor $ Buffer "test" up) never
     --     :: UI (Behavior Editor)
 
     -- rec cb <- do
     --         let is = instrs (fst <$> cb) key
     --             update i (context, b) =
-    --                 let (ma, d, cp') = updater (carpenter context) i
-    --                 in  ( context { carpenter = cp' }
+    --                 let (ma, d, cp') = updater (updater context) i
+    --                 in  ( context { updater = cp' }
     --                     , maybe Empty id $ runViewer test <$> ma )
     --         accumB (initc, bu) $ update <$> is
     --             :: UI (Behavior (Context, Brick))
 
     -- brick <- brick . snd <$> cb
 
-    initb <- brick (carets initc) bu
-    return buf # set UI.children [initb]
+    -- initb <- brick (carets initc) initui
+    el <- iui
+    return buf # set UI.children [el]
+
+    traceShow (carets initc, struct initc) $ return ()
 
     mainB <- mainAccum initc input
 
-    onChanges mainB $ \(c, a) -> do
-        b <- brick (carets c) a
-        return buf # set UI.children [b]
+    onChanges mainB $ \(c, ui) -> do
+        -- b <- brick (carets c) a
+        el <- ui
+        return buf # set UI.children [el]
 
     -- return buf # sink UI.children (_ (:[]) . brick . snd <$> cb)
 
     return buf
 
-mainAccum :: Context -> Event Input -> UI (Behavior (Context, Brick))
+mainAccum :: Context -> Event Input -> UI (Behavior (Context, UI Element))
 mainAccum initc charE =
-    accumB (initc, Empty) $ (`fmap` charE) $ \input (context, b) ->
-    case input of
-        KeyCode c -> case Key.keyCodeLookup c of
-            Key.ArrowUp    -> (moveCarets (Pos.up 1)   context, b)
-            Key.ArrowDown  -> (moveCarets (Pos.down 1) context, b)
-            Key.ArrowRight -> (moveCarets (Pos.next 1) context, b)
-            Key.ArrowLeft  -> (moveCarets (Pos.prev 1) context, b)
-            _              -> (context, b)
-        InputChar c ->
-            let is = const (ISet $ toDyn c) <$> carets context
-                (ma, d, cp) = updater (carpenter context) is
-                b'          = maybe Empty id $ runViewer test <$> ma
-             in  (context { carpenter = cp } , b')
+    accumB (initc, UI.new) $ (`fmap` charE) $ \input (context, el) ->
+        case input of
+            KeyCode c -> case Key.keyCodeLookup c of
+                Key.ArrowUp    -> moveCarets (Pos.up 1)   context
+                Key.ArrowDown  -> moveCarets (Pos.down 1) context
+                Key.ArrowRight -> moveCarets (Pos.next 1) context
+                Key.ArrowLeft  -> moveCarets (Pos.prev 1) context
+                Key.Delete     -> instrs IDelete context
+                _              -> (context, el)
+            InputChar c -> instrs (ISet $ toDyn c) context
+
+instrs :: Instr -> Context -> (Context, UI Element)
+instrs i context =
+    let is       = traceShowId $ instrOn i <$> carets context
+        (ma, up) = update (updater context) is
+        el       = fromMaybe UI.new $ do
+            a <- ma
+            render (syntax context) (carets context) a
+        mst      = ma >>= xray (syntax context)
+    in  (context { struct  = fromMaybe (struct context) mst
+                 , value   = fromMaybe (value  context) ma
+                 , updater = up } , el)
+
+instrOn :: Instr -> Caret -> Instr
+instrOn i NoCaret = mempty
+instrOn i _       = i
 
 
-moveCarets :: Pos.Path -> Context -> Context
+moveCarets :: Pos.Path -> Context -> (Context, UI Element)
 moveCarets p context =
     let cs  = carets context
-        mcs = Pos.move p cs
-        rcs = railTop (carpenter context) mcs
-    in trace (unlines $ show cs : show mcs : show rcs : [])
-        context { carets = rcs }
+        -- mcs = Pos.move p cs
+        -- rcs = railTop (struct context) mcs
+        mcs = cs
+        rcs = cs
+    in trace (unlines $ map show [cs, mcs, rcs])
+        ( context { carets = rcs }
+        , fromMaybe UI.new $ render (syntax context) rcs (value context)
+        )
 
-instrs :: Behavior Context -> Event Char -> Event Instrs
-instrs contextB charE =
-    (\context c -> case Key.keyCodeLookup $ ord c of
-            Key.Enter -> mempty
-            _         -> const (ISet $ toDyn c) <$> carets context)
-    <$> contextB <@> charE
+-- instrs :: Behavior Context -> Event Char -> Event Instrs
+-- instrs contextB charE =
+--     (\context c -> case Key.keyCodeLookup $ ord c of
+--             Key.Enter -> mempty
+--             _         -> const (ISet $ toDyn c) <$> carets context)
+--     <$> contextB <@> charE
 
-brick :: Carets -> Brick -> UI Element
-brick c b = do
-    el <- case b of
-    -- Plane x -> mapM (\c -> UI.span # set UI.text [c]) x
-        Plane c  -> UI.span # set UI.text [c]
-        Array xs -> do
-            bs <- zipWithM brick (Pos.listSubInf c) xs
-            UI.new # set UI.children bs
-        Empty    -> UI.span # set UI.text "<empty>"
-    unless (null $ Pos.roots c) $ void $
-        return el
-        # set style [ ("background", "black")
-                    , ("color",      "white")]
-    return el
+-- brick :: Pos.Carets -> Brick -> UI Element
+-- brick c b = do
+--     el <- case b of
+--     -- Plane x -> mapM (\c -> UI.span # set UI.text [c]) x
+--         Token c  -> UI.span # set UI.text [c]
+--         Array xs -> do
+--             bs <- zipWithM brick (Pos.listSubInf c) xs
+--             UI.new # set UI.children bs
+--         Empty    -> UI.span # set UI.text "<empty>"
+--     unless (null $ Pos.roots c) $ void $
+--         return el
+--         # set UI.style [ ("background", "black")
+--                     , ("color",      "white")]
+--     return el
 
 
 data KeyModifier = KeyModifier
@@ -203,14 +236,14 @@ data KeyModifier = KeyModifier
 --     conn <- WS.acceptRequest pending
 --     WS.forkPingThread conn 30
 
---     -- let c = Context $ carpenter
+--     -- let c = Context $ updater
 
 --     let Just (b, c) = builder test test1
 
 --     let msg = LoadBuffer 0 $ Buffer "test" b
 --     WS.sendTextData conn $ encode msg
 
---     loop conn $ Context { carpenter = c }
+--     loop conn $ Context { updater = c }
 
 
 -- loop :: WS.Connection -> Context -> IO ()
@@ -223,9 +256,9 @@ data KeyModifier = KeyModifier
 --                 let p = fromEnum x
 --                 in  [Sub 0 [Root $ ISet $ toDyn p]]
 --             _                    -> []
---         (ma, d, c') = updater (carpenter c) is
+--         (ma, d, c') = updater (updater c) is
 
---     -- let r = runCarpenter (carpenter c) Nothing []
+--     -- let r = runCarpenter (updater c) Nothing []
 
 --     print (decode msg :: Maybe Event)
 --     loop conn c

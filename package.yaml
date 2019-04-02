@@ -23,14 +23,16 @@ dependencies:
 - base >= 4.7 && < 5
 - text
 - bytestring
+- transformers
 - mtl
 - containers
 - partial-isomorphisms
+- data-reify
+- hint
+- haskell-src-exts
 - threepenny-gui
 - keycode
 # - data-nat
-- hint
-- haskell-src-exts
 
 library:
   source-dirs: src
