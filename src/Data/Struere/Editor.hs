@@ -116,10 +116,10 @@ mainAccum initc charE =
     accumB (initc, UI.new) $ (`fmap` charE) $ \input (context, el) ->
         case input of
             KeyCode c -> case Key.keyCodeLookup c of
-                Key.ArrowUp    -> moveCarets (Pos.up 1)   context
-                Key.ArrowDown  -> moveCarets (Pos.down 1) context
-                Key.ArrowRight -> moveCarets (Pos.next 1) context
-                Key.ArrowLeft  -> moveCarets (Pos.prev 1) context
+                Key.ArrowUp    -> moveCarets CaretUp   context
+                Key.ArrowDown  -> moveCarets CaretDown context
+                Key.ArrowRight -> moveCarets CaretNext context
+                Key.ArrowLeft  -> moveCarets CaretPrev context
                 Key.Delete     -> instrs IDelete context
                 _              -> (context, el)
             InputChar c -> instrs (ISet $ toDyn c) context
@@ -141,16 +141,14 @@ instrOn i NoCaret = mempty
 instrOn i _       = i
 
 
-moveCarets :: Pos.Path -> Context -> (Context, UI Element)
-moveCarets p context =
+moveCarets :: CaretMove -> Context -> (Context, UI Element)
+moveCarets mv context =
     let cs  = carets context
-        -- mcs = Pos.move p cs
+        mcs = move mv (struct context) cs
         -- rcs = railTop (struct context) mcs
-        mcs = cs
-        rcs = cs
-    in trace (unlines $ map show [cs, mcs, rcs])
-        ( context { carets = rcs }
-        , fromMaybe UI.new $ render (syntax context) rcs (value context)
+    in trace (unlines $ show (struct context) :  map show [cs, mcs])
+        ( context { carets = mcs }
+        , fromMaybe UI.new $ render (syntax context) mcs (value context)
         )
 
 -- instrs :: Behavior Context -> Event Char -> Event Instrs

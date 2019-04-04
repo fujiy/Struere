@@ -22,6 +22,8 @@ import           Control.Category
 import           Control.Monad
 -- import           Control.Monad.Identity
 -- import           Data.Coerce
+import           Data.IntMap              (IntMap)
+import qualified Data.IntMap              as IntMap
 import           Data.Reify
 import qualified Data.Sequence            as Seq
 import           Prelude                  hiding (id, product, pure, (.), (<$>),
@@ -31,8 +33,8 @@ import           Unsafe.Coerce
 -- import           Prelude                  as P
 
 import           Data.Struere.Isomorphism hiding (cons)
-import           Data.Struere.Position    as Pos
-import           Data.Struere.Syntax
+import qualified Data.Struere.Position    as Pos
+import           Data.Struere.Syntax      hiding (not)
 import           Data.Struere.Util        hiding (Nat (..))
 
 import           Debug.Trace
@@ -90,12 +92,12 @@ construct = \case
 --              | DCons (Distr d) (Distr d)
 --              | DSub  (Distr d)
 
-data Distr a = Distr a (Child a) deriving (Eq, Show, Functor)
+data Distr a = Distr a (Child a) deriving (Eq, Show, Functor, Foldable)
 
 data Child a = Leaf
              | Cons (Distr a) (Distr a)
              | Sub  (Distr a)
-    deriving (Eq, Show, Functor)
+    deriving (Eq, Show, Functor, Foldable)
 
 -- type Diff a = Distr (Maybe a)
 
@@ -106,9 +108,11 @@ instance Monoid a => Monoid (Distr a) where
     mempty = Distr mempty mempty
 
 instance Semigroup a => Semigroup (Child a) where
-    Leaf     <> Leaf     = Leaf
+    Leaf     <> x        = x
+    x        <> Leaf     = x
     Cons x y <> Cons z w = Cons (x <> z) (y <> w)
     Sub x    <> Sub y    = Sub (x <> y)
+    -- x        <> _        = x
 
 instance Semigroup a => Monoid (Child a) where
     mempty = Leaf
@@ -121,8 +125,7 @@ desub :: Monoid a => Child a -> Distr a
 desub (Sub x) = x
 desub _       = mempty
 
-
-fromPosition :: Monoid a => Struct -> Position -> a -> Distr a
+fromPosition :: Monoid a => Struct -> Pos.Position -> a -> Distr a
 fromPosition _            Seq.Empty            a = Distr a Leaf
 fromPosition (Distr _ dc) pos@(x Seq.:<| pos') a = case dc of
     Leaf       -> Distr a Leaf
@@ -135,6 +138,12 @@ fromPosition (Distr _ dc) pos@(x Seq.:<| pos') a = case dc of
                   then Distr a Leaf
                   else let d = fromPosition dx pos' a
                        in  Distr mempty (Sub d)
+
+flatten :: Monoid a => Distr a -> Distr a
+flatten d = Distr (mconcatF d) mempty
+
+flatten' :: Monoid a => Distr a -> a
+flatten' = mconcatF
 
 -- newtype Distributor r d a = Distributor
 --     { distribute :: forall f g. (Syntax f, Syntax g)
@@ -161,21 +170,6 @@ unit = Distr 1 Leaf
 
 -- sub :: Struct -> Struct
 -- sub = Struct 1 True . Sub
-
-
-type Carets = Distr Caret
-
-data Caret = NoCaret
-           | InsertCaret
-           | ReplaceCaret
-    deriving (Eq, Show)
-
-instance Semigroup Caret where
-    NoCaret <> x = x
-    x       <> _ = x
-
-instance Monoid Caret where
-    mempty = NoCaret
 
 
 -- data Struct = Struct
@@ -224,11 +218,164 @@ instance Syntax Radiographer where
             let size = if isOrnament d then 0 else 1
             return $ Distr size (Sub ac)
 
+
+type Carets = Distr Caret
+
+data Caret = NoCaret
+           | InsertCaret
+           | ReplaceCaret
+    deriving (Eq, Show)
+
+instance Semigroup Caret where
+    NoCaret <> x = x
+    x       <> _ = x
+
+instance Monoid Caret where
+    mempty = NoCaret
+
+data CaretMove = CaretUp
+               | CaretDown
+               | CaretNext
+               | CaretPrev
+
+move :: Monoid a => CaretMove -> Struct -> Distr a -> Distr a
+move cm st d = case cm of
+    CaretUp   -> uncurry (narrowFirst st) $ up st d
+        -- let (Distr a dc, a') = up st d
+        --          in  Distr (a <> a') dc
+    CaretDown -> down st d mempty
+    CaretNext -> uncurry (narrowLast  st) $ next st d mempty
+    CaretPrev -> uncurry (narrowFirst st) $ prev st d mempty
+  where
+     up :: Monoid a => Struct -> Distr a -> (Distr a, a)
+     up (Distr _ sc) d@(Distr a dc) = case sc of
+         Leaf       -> (mempty, flatten' d)
+         Cons sx sy ->
+             let (dx, dy) = deprod dc
+                 (dx', b) = up sx dx
+                 (dy', c) = up sy dy
+             in  ( Distr mempty (Cons dx' dy'), a <> b <> c )
+         Sub sx     ->
+             let (dx', b) = up sx (desub dc)
+             in  ( Distr b (Sub dx'), a )
+
+     down :: Monoid a => Struct -> Distr a -> a -> Distr a
+     down (Distr _ sc) (Distr a dc) a' = case sc of
+         Leaf       -> Distr (a <> a') dc
+         Cons sx sy ->
+             let (dx, dy) = deprod dc
+                 dx'      = down sx dx (a <> a')
+                 dy'      = down sy dy mempty
+             in  Distr mempty (Cons dx' dy')
+         Sub sx     -> Distr a' (Sub (down sx (desub dc) a))
+
+     next :: Monoid a => Struct -> Distr a -> a -> (Distr a, a)
+     next (Distr sz sc) (Distr a dc) a' = case sc of
+         _ | sz == 0 -> ( Distr mempty dc, a <> a' )
+         Leaf        -> ( Distr a' dc, a )
+         Cons sx sy  ->
+             let (dx, dy) = deprod dc
+                 (dx', b) = next sx dx a'
+                 (dy', c) = next sy dy b
+             in  ( Distr mempty (Cons dx' dy'), a <> c )
+         Sub sx      ->
+             let (dx', b) = next sx (desub dc) a'
+             in  ( Distr a' (Sub (narrowLast sx dx' b)), a)
+
+     narrowLast :: Monoid a => Struct -> Distr a -> a -> Distr a
+     narrowLast (Distr _ sc) (Distr a dc) a' = case sc of
+         Cons sx sy -> let (dx, dy) = deprod dc
+                       in if size sy > 0
+                           then Distr a (Cons dx (narrowLast sy dy a'))
+                           else Distr a (Cons (narrowLast sx dx a') dy)
+         _          -> Distr (a <> a') dc
+
+     prev :: Monoid a => Struct -> Distr a -> a -> (Distr a, a)
+     prev (Distr sz sc) (Distr a dc) a' = case sc of
+         _ | sz == 0 -> ( Distr mempty dc, a <> a' )
+         Leaf        -> ( Distr a' dc, a )
+         Cons sx sy  ->
+             let (dx, dy) = deprod dc
+                 (dy', b) = prev sy dy a'
+                 (dx', c) = prev sx dx b
+             in  ( Distr mempty (Cons dx' dy'), a <> c )
+         Sub sx      ->
+             let (dx', b) = prev sx (desub dc) a'
+             in  ( Distr a' (Sub (narrowFirst sx dx' b)), a)
+
+     narrowFirst :: Monoid a => Struct -> Distr a -> a -> Distr a
+     narrowFirst (Distr _ sc) (Distr a dc) a' = case sc of
+         Cons sx sy -> let (dx, dy) = deprod dc
+                       in if size sx > 0
+                           then Distr a (Cons (narrowFirst sx dx a') dy)
+                           else Distr a (Cons dx (narrowFirst sy dy a'))
+         _          -> Distr (a <> a') dc
+
+-- move :: Monoid a => Struct -> Pos.Path -> Distr a -> Distr a
+-- move st (Pos.Path u x p) = nexts x st . ups' u
+--   where
+--     ups' :: Monoid a => Int -> Distr a -> Distr a
+--     ups' 0 d = d
+--     ups' n d = let (Distr a dc, us) = ups n d
+--                in  Distr (a <> mconcatF us) dc
+
+--     ups :: Monoid a => Int -> Distr a -> (Distr a, Seq.Seq a)
+--     ups n (Distr a dc) =
+--         let (dc', u Seq.:<| us) = case dc of
+--                 Leaf       -> (mempty, emptyNSeq)
+--                 Cons dx dy ->
+--                     let (dx', uxs) = ups n dx
+--                         (dy', uys) = ups n dy
+--                     in  ( Cons dx' dy'
+--                         , Seq.zipWith (<>) uxs uys)
+--                 Sub dx     -> mapFst Sub $ ups n dx
+--         in (Distr u dc', us Seq.|> a)
+--       where
+--         emptyNSeq :: Monoid a => Seq.Seq a
+--         emptyNSeq = Seq.replicate n mempty
+
+--     nexts :: Monoid a => Int -> Struct -> Distr a -> Distr a
+--     nexts x st@(Distr _ sc) d@(Distr a dc) = case sc of
+--         Leaf     -> flatten d
+--         Cons _ _ -> let (Distr a' dc, ns) = consNexts st d emptyXSeq
+--                     in  Distr (a' <> mconcatF ns) dc
+--         Sub sx   -> Distr a (Sub (nexts x sx (desub dc)))
+--       where
+--         consNexts :: Monoid a
+--                   => Struct -> Distr a -> Seq.Seq a -> (Distr a, Seq.Seq a)
+--         consNexts (Distr _ (Cons sx sy)) (Distr a dc) ns | x > 0 =
+--             let (dx, dy)   = deprod dc
+--                 (dx', nxs) = consNexts sx dx ns
+--                 (dy', nys) = consNexts sy dy nxs
+--             in  ( Distr a (Cons dx' dy')
+--                 , nys )
+--         consNexts (Distr _ (Cons sx sy)) (Distr a dc) ns =
+--             let (dx, dy)   = deprod dc
+--                 (dy', nys) = consNexts sy dy ns
+--                 (dx', nxs) = consNexts sx dx nys
+--             in  ( Distr a (Cons dx' dy')
+--                 , nxs )
+--         consNexts st d ns
+--             | size st == 0 = ( d, ns )
+--         consNexts st d ns  =
+--             let Distr a dc = nexts x st d
+--                 (nxs, nys) = Seq.splitAt (size st) ns
+--             in  ( Distr (mconcatF nxs) dc
+--                 , nys Seq.|> a )
+
+--         emptyXSeq :: Monoid a => Seq.Seq a
+--         emptyXSeq = Seq.replicate (abs x) mempty
+
+--     downs :: Pos.Position -> Struct -> Distr a -> Distr a
+--     downs Seq.Empty _ d = d
+--     downs pos (Distr _ sc) d = case sc of
+--         Cons sx sy ->
+
 -- consStruct :: Struct -> Struct -> Struct
 -- consStruct sta stb = Struct (size sta + size stb) False (Cons sta stb)
 
--- uncons :: Struct -> Pos.Positioned a
---           -> ((Struct, Struct), (Pos.Positioned a, Pos.Positioned a))
+-- uncons :: Struct -> Pos.Distr a
+--           -> ((Struct, Struct), (Pos.Distr a, Pos.Distr a))
 -- uncons st p =
 --     let Cons sta stb = substract st
 --         (px, py)        = Pos.split (size sta) p
@@ -236,16 +383,16 @@ instance Syntax Radiographer where
 --         py'             = applyWhen (isSingle stb) Pos.head py
 --     in  ((sta, stb), (px', py'))
 
--- cons :: (Struct, Struct) -> (Pos.Positioned a, Pos.Positioned a)
---      -> Pos.Positioned a
+-- cons :: (Struct, Struct) -> (Pos.Distr a, Pos.Distr a)
+--      -> Pos.Distr a
 -- cons (sta, stb) (px, py) =
 --     Pos.merge (size sta)
 --     (applyWhen (isSingle sta) Pos.singleton px)
 --     (applyWhen (isSingle stb) Pos.singleton py)
 
 
--- product :: (Struct, Struct) -> (Pos.Positioned a, Pos.Positioned a)
---         -> (Struct, Pos.Positioned a)
+-- product :: (Struct, Struct) -> (Pos.Distr a, Pos.Distr a)
+--         -> (Struct, Pos.Distr a)
 -- product (sta, stb) (px, py) =
 --     ( Struct (size sta + size stb) False $ Product' sta stb
 --     , Pos.merge (size sta) px py)
@@ -255,7 +402,7 @@ instance Syntax Radiographer where
 -- railTop st cs = Pos.onRoots (Pos.roots cs)
 --              <> rail st (Pos.narrow 0 (size st - 1) cs)
 
--- rail :: Struct -> Pos.Positioned () -> Pos.Positioned ()
+-- rail :: Struct -> Pos.Distr () -> Pos.Distr ()
 -- rail st p = case substract st of
 --     Unit     -> Pos.bottom p
 --     Sub st'  -> Pos.onRoots (Pos.roots p)

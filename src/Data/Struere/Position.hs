@@ -189,6 +189,4 @@ down :: Int -> Path
 down x | x >= 0    = Path 0 0 (Seq.replicate x 0)
        | otherwise = up $ negate x
 
--- Caret
 
-type Carets = Positioned ()

@@ -55,11 +55,6 @@ noInstr _     = False
 
 
 
-data CaretMove
-    = MoveVert Int
-    | MoveHoriz Int
-    deriving (Eq, Show)
-
 -- data Carpenter a = Carpenter
 --     { builder :: Struct -> a -> Maybe (Carpenter a)
 --     , updater :: Instrs -> (Maybe (Struct, a), Carpenter a)

@@ -62,3 +62,6 @@ plusMaybe _ x        Nothing  = x
 
 fmapFst :: Functor f => (a -> c) -> f (a, b) -> f (c, b)
 fmapFst f = fmap $ mapFst f
+
+mconcatF :: (Foldable f, Monoid a) => f a -> a
+mconcatF = foldr (<>) mempty
