@@ -1,96 +1,75 @@
-{-# LANGUAGE AllowAmbiguousTypes       #-}
 {-# LANGUAGE ConstraintKinds           #-}
 {-# LANGUAGE DeriveFoldable            #-}
 {-# LANGUAGE DeriveFunctor             #-}
 {-# LANGUAGE DeriveTraversable         #-}
 {-# LANGUAGE ExistentialQuantification #-}
+{-# LANGUAGE FlexibleContexts          #-}
 {-# LANGUAGE FlexibleInstances         #-}
 {-# LANGUAGE GADTs                     #-}
+{-# LANGUAGE ImpredicativeTypes        #-}
 {-# LANGUAGE LambdaCase                #-}
+{-# LANGUAGE PatternSynonyms           #-}
 {-# LANGUAGE Rank2Types                #-}
 {-# LANGUAGE RecursiveDo               #-}
 {-# LANGUAGE ScopedTypeVariables       #-}
+{-# LANGUAGE StandaloneDeriving        #-}
 {-# LANGUAGE TypeFamilies              #-}
+{-# LANGUAGE UndecidableInstances      #-}
+{-# LANGUAGE ViewPatterns              #-}
 
 module Data.Struere.Struct where
 
 
-import           Control.Applicative      (Const (..))
-import qualified Control.Applicative      as Ap
+import           Control.Applicative        (Const (..))
+import qualified Control.Applicative        as Ap
 
+import qualified Control.Arrow              as Arrow
 import           Control.Category
 import           Control.Monad
+import           Control.Monad.State.Strict
 -- import           Control.Monad.Identity
 -- import           Data.Coerce
-import           Data.IntMap              (IntMap)
-import qualified Data.IntMap              as IntMap
-import           Data.Reify
-import qualified Data.Sequence            as Seq
-import           Prelude                  hiding (id, product, pure, (.), (<$>),
-                                           (<*>))
+import           Data.IntMap                (IntMap)
+import qualified Data.IntMap                as IntMap
+import           Data.Maybe
+import qualified Data.Sequence              as Seq
+import           Prelude                    hiding (id, product, pure, (.),
+                                             (<$>), (<*>))
 import           System.Mem.StableName
+import           Type.Reflection            (TypeRep, Typeable, typeOf)
 import           Unsafe.Coerce
 -- import           Prelude                  as P
 
-import           Data.Struere.Isomorphism hiding (cons)
-import qualified Data.Struere.Position    as Pos
-import           Data.Struere.Syntax      hiding (not)
-import           Data.Struere.Util        hiding (Nat (..))
+import           Data.Struere.Isomorphism   hiding (cons)
+import           Data.Struere.Syntax        hiding (not)
+import           Data.Struere.Util          hiding (Nat (..))
 
 import           Debug.Trace
 
--- data Archivist f a = Archivist
---     { finished     :: f a
---     , constitution :: Con f a
---     }
 
-data Con f a where
-    IsoMap  :: Iso a b -> Con f a -> Con f b
-    Product :: Con f a -> Con f b -> Con f (a, b)
-    Alter   :: Con f a -> Con f a -> Con f a
-    Empty   :: Con f a
-    -- Pure    :: a -> Con f a
-    End     :: f a -> Con f a
-    -- Token   :: Con f Char
-    Part    :: Con f a -> Con f a
-    Rec     :: Int -> Con f a
+-- |Position
 
--- instance Functor (Con f) where
+type Position = Seq.Seq Int
 
-instance IsoFunctor (Con f) where
-    (<$>) = IsoMap
+sub :: Int -> Position -> Position
+sub = (Seq.<|)
 
-instance ProductFunctor (Con f) where
-    (<*>) = Product
+zero :: Position
+zero = Seq.singleton 0
 
-instance Alter f => Alter (Con f) where
-    empty = End empty
-    (<|>) = Alter
+root :: Position
+root = Seq.empty
 
-instance Syntax f => Syntax (Con f) where
-    pure a = End (pure a)
-    char   = End char
-    part _ = Part
-
-mapEnd :: (f a -> g a) -> Con f a -> Con g a
-mapEnd = mapEnd
-
-recursive :: Con f a -> IO (Con f a)
-recursive = recursive
-
-construct :: Syntax f => Con f a -> f a
-construct = \case
-    End     fa      -> fa
-    IsoMap  iso eqa -> iso <$> construct eqa
-    Product eqa eqb -> construct eqa <*> construct eqb
-    Alter   eqa eqb -> construct eqa <|> construct eqb
-
+fromList :: [Int] -> Position
+fromList = Seq.fromList
 
 
 -- data Distr d = None
 --              | Pure d
 --              | DCons (Distr d) (Distr d)
 --              | DSub  (Distr d)
+
+-- |Distr
 
 data Distr a = Distr a (Child a) deriving (Eq, Show, Functor, Foldable)
 
@@ -125,7 +104,7 @@ desub :: Monoid a => Child a -> Distr a
 desub (Sub x) = x
 desub _       = mempty
 
-fromPosition :: Monoid a => Struct -> Pos.Position -> a -> Distr a
+fromPosition :: Monoid a => Struct -> Position -> a -> Distr a
 fromPosition _            Seq.Empty            a = Distr a Leaf
 fromPosition (Distr _ dc) pos@(x Seq.:<| pos') a = case dc of
     Leaf       -> Distr a Leaf
@@ -159,6 +138,7 @@ flatten' = mconcatF
 --     mempty = Diff [] mempty
 
 
+-- |Struct
 
 type Struct = Distr Int
 
@@ -218,6 +198,7 @@ instance Syntax Radiographer where
             let size = if isOrnament d then 0 else 1
             return $ Distr size (Sub ac)
 
+-- |Caret
 
 type Carets = Distr Caret
 
@@ -240,6 +221,7 @@ data CaretMove = CaretUp
 
 move :: Monoid a => CaretMove -> Struct -> Distr a -> Distr a
 move cm st d = case cm of
+    -- CaretStay -> rail
     CaretUp   -> uncurry (narrowFirst st) $ up st d
         -- let (Distr a dc, a') = up st d
         --          in  Distr (a <> a') dc
@@ -247,69 +229,213 @@ move cm st d = case cm of
     CaretNext -> uncurry (narrowLast  st) $ next st d mempty
     CaretPrev -> uncurry (narrowFirst st) $ prev st d mempty
   where
-     up :: Monoid a => Struct -> Distr a -> (Distr a, a)
-     up (Distr _ sc) d@(Distr a dc) = case sc of
-         Leaf       -> (mempty, flatten' d)
-         Cons sx sy ->
-             let (dx, dy) = deprod dc
-                 (dx', b) = up sx dx
-                 (dy', c) = up sy dy
-             in  ( Distr mempty (Cons dx' dy'), a <> b <> c )
-         Sub sx     ->
-             let (dx', b) = up sx (desub dc)
-             in  ( Distr b (Sub dx'), a )
+    up :: Monoid a => Struct -> Distr a -> (Distr a, a)
+    up (Distr _ sc) d@(Distr a dc) = case sc of
+        Leaf       -> (mempty, flatten' d)
+        Cons sx sy ->
+            let (dx, dy) = deprod dc
+                (dx', b) = up sx dx
+                (dy', c) = up sy dy
+            in  ( Distr mempty (Cons dx' dy'), a <> b <> c )
+        Sub sx     ->
+            let (dx', b) = up sx (desub dc)
+            in  ( Distr b (Sub dx'), a )
 
-     down :: Monoid a => Struct -> Distr a -> a -> Distr a
-     down (Distr _ sc) (Distr a dc) a' = case sc of
-         Leaf       -> Distr (a <> a') dc
-         Cons sx sy ->
-             let (dx, dy) = deprod dc
-                 dx'      = down sx dx (a <> a')
-                 dy'      = down sy dy mempty
-             in  Distr mempty (Cons dx' dy')
-         Sub sx     -> Distr a' (Sub (down sx (desub dc) a))
+    down :: Monoid a => Struct -> Distr a -> a -> Distr a
+    down (Distr _ sc) (Distr a dc) a' = case sc of
+        Leaf       -> Distr (a <> a') dc
+        Cons sx sy ->
+            let (dx, dy) = deprod dc
+                dx'      = down sx dx (a <> a')
+                dy'      = down sy dy mempty
+            in  Distr mempty (Cons dx' dy')
+        Sub sx     -> Distr a' (Sub (down sx (desub dc) a))
 
-     next :: Monoid a => Struct -> Distr a -> a -> (Distr a, a)
-     next (Distr sz sc) (Distr a dc) a' = case sc of
-         _ | sz == 0 -> ( Distr mempty dc, a <> a' )
-         Leaf        -> ( Distr a' dc, a )
-         Cons sx sy  ->
-             let (dx, dy) = deprod dc
-                 (dx', b) = next sx dx a'
-                 (dy', c) = next sy dy b
-             in  ( Distr mempty (Cons dx' dy'), a <> c )
-         Sub sx      ->
-             let (dx', b) = next sx (desub dc) a'
-             in  ( Distr a' (Sub (narrowLast sx dx' b)), a)
+    next :: Monoid a => Struct -> Distr a -> a -> (Distr a, a)
+    next (Distr sz sc) (Distr a dc) a' = case sc of
+        _ | sz == 0 -> ( Distr mempty dc, a <> a' )
+        Leaf        -> ( Distr a' dc, a )
+        Cons sx sy  ->
+            let (dx, dy) = deprod dc
+                (dx', b) = next sx dx a'
+                (dy', c) = next sy dy b
+            in  ( Distr mempty (Cons dx' dy'), a <> c )
+        Sub sx      ->
+            let (dx', b) = next sx (desub dc) a'
+            in  ( Distr a' (Sub (narrowLast sx dx' b)), a)
 
-     narrowLast :: Monoid a => Struct -> Distr a -> a -> Distr a
-     narrowLast (Distr _ sc) (Distr a dc) a' = case sc of
-         Cons sx sy -> let (dx, dy) = deprod dc
-                       in if size sy > 0
-                           then Distr a (Cons dx (narrowLast sy dy a'))
-                           else Distr a (Cons (narrowLast sx dx a') dy)
-         _          -> Distr (a <> a') dc
+    prev :: Monoid a => Struct -> Distr a -> a -> (Distr a, a)
+    prev (Distr sz sc) (Distr a dc) a' = case sc of
+        _ | sz == 0 -> ( Distr mempty dc, a <> a' )
+        Leaf        -> ( Distr a' dc, a )
+        Cons sx sy  ->
+            let (dx, dy) = deprod dc
+                (dy', b) = prev sy dy a'
+                (dx', c) = prev sx dx b
+            in  ( Distr mempty (Cons dx' dy'), a <> c )
+        Sub sx      ->
+            let (dx', b) = prev sx (desub dc) a'
+            in  ( Distr a' (Sub (narrowFirst sx dx' b)), a)
 
-     prev :: Monoid a => Struct -> Distr a -> a -> (Distr a, a)
-     prev (Distr sz sc) (Distr a dc) a' = case sc of
-         _ | sz == 0 -> ( Distr mempty dc, a <> a' )
-         Leaf        -> ( Distr a' dc, a )
-         Cons sx sy  ->
-             let (dx, dy) = deprod dc
-                 (dy', b) = prev sy dy a'
-                 (dx', c) = prev sx dx b
-             in  ( Distr mempty (Cons dx' dy'), a <> c )
-         Sub sx      ->
-             let (dx', b) = prev sx (desub dc) a'
-             in  ( Distr a' (Sub (narrowFirst sx dx' b)), a)
+narrowLast :: Monoid a => Struct -> Distr a -> a -> Distr a
+narrowLast (Distr _ sc) (Distr a dc) a' = case sc of
+    Cons sx sy -> let (dx, dy) = deprod dc
+                  in if size sy > 0
+                     then Distr a (Cons dx (narrowLast sy dy a'))
+                     else Distr a (Cons (narrowLast sx dx a') dy)
+    _          -> Distr (a <> a') dc
 
-     narrowFirst :: Monoid a => Struct -> Distr a -> a -> Distr a
-     narrowFirst (Distr _ sc) (Distr a dc) a' = case sc of
-         Cons sx sy -> let (dx, dy) = deprod dc
-                       in if size sx > 0
-                           then Distr a (Cons (narrowFirst sx dx a') dy)
-                           else Distr a (Cons dx (narrowFirst sy dy a'))
-         _          -> Distr (a <> a') dc
+narrowFirst :: Monoid a => Struct -> Distr a -> a -> Distr a
+narrowFirst (Distr _ sc) (Distr a dc) a' = case sc of
+    Cons sx sy -> let (dx, dy) = deprod dc
+                  in if size sx > 0
+                     then Distr a (Cons (narrowFirst sx dx a') dy)
+                     else Distr a (Cons dx (narrowFirst sy dy a'))
+    _          -> Distr (a <> a') dc
+
+
+rail :: Monoid a => Struct -> Distr a -> Distr a
+rail (Distr _ sc) d@(Distr a dc) = case sc of
+    Leaf       -> flatten d
+    Cons sx sy | size sx == 0 ->
+        let (dx, dy) = deprod dc
+            dy'      = narrowFirst sy (rail sy dy) (flatten' dx)
+        in  Distr a (Cons mempty dy')
+    Cons sx sy | size sy == 0 ->
+        let (dx, dy) = deprod dc
+            dx'      = narrowLast sx (rail sx dx) (flatten' dy)
+        in  Distr a (Cons dx' mempty)
+    Cons sx sy ->
+        let (dx, dy) = deprod dc
+            dx'      = rail sx dx
+            dy'      = rail sy dy
+        in  Distr a (Cons dx' dy')
+    Sub sx ->
+        let dx' = rail sx $ case dc of
+                Cons dx dy -> dx <> dy
+                _          -> desub dc
+        in  Distr a (Sub dx')
+
+-- |Con
+
+-- data Archivist f a = Archivist
+--     { finished     :: f a
+--     , constitution :: Con f a
+--     }
+
+data Con f a = Con
+    { fin    :: f a
+    , subCon :: SubCon f a
+    }
+
+data SubCon f a where
+    IsoMap  :: Iso a b -> Con f a -> SubCon f b
+    Product :: Con f a -> Con f b -> SubCon f (a, b)
+    Alter   :: Con f a -> Con f a -> SubCon f a
+    Empty   :: SubCon f a
+    -- Pure    :: a -> Con f a
+    End     :: SubCon f a
+    -- Token   :: Con f Char
+    Nest    :: Con f a -> SubCon f a
+
+    -- Rec     :: Int -> Con f a
+
+type Unique    = Int
+type UniqueMap = IntMap
+
+-- newtype Blueprinter a = Blueprinter (UniqueMap Int -> IO (Con f a))
+
+instance IsoFunctor f => IsoFunctor (Con f) where
+    iso <$> c = Con (iso <$> fin c) (IsoMap iso c)
+
+instance ProductFunctor f => ProductFunctor (Con f) where
+    c <*> d = Con (fin c <*> fin d) (Product c d)
+
+instance Alter f => Alter (Con f) where
+    empty   = Con empty End
+    c <|> d = Con (fin c <|> fin d) (Alter c d)
+
+instance Syntax f => Syntax (Con f) where
+    pure a   = Con (pure a) End
+    char     = Con char End
+    part d c = Con (part d $ fin c) (Nest c)
+
+
+pattern BIsoMap u x <-
+    ( id Arrow.&&& (\(subCon -> IsoMap _ x) -> unsafeCoerce x)
+    -> (Con (Const u) _, x :: Blueprint))
+
+pattern BProduct u x y <-
+    ((unsafeCoerce :: Blueprint -> Con (Const Unique) ((), ()))
+    -> Con (Const u) (Product x y))
+
+pattern BAlter u x y <- Con (Const u) (Alter x y)
+
+pattern BNest u x <- Con (Const u) (Nest x)
+
+type Blueprint = Con (Const Unique) ()
+
+unique :: Blueprint -> Unique
+unique (Con (Const u) _) = u
+
+coerceBProduct :: Blueprint -> Con (Const Unique) ((), ())
+coerceBProduct = unsafeCoerce
+
+coerce :: SubCon (Const Unique) a -> SubCon (Const Unique) b
+coerce = unsafeCoerce
+
+getBlueprint :: Syntax f => Con f a -> IO Blueprint
+getBlueprint c = evalStateT (go c) IntMap.empty
+  where
+    go :: Con f a -> StateT (UniqueMap Blueprint) IO Blueprint
+    go (Con p sc) = mdo
+        u   <- hashStableName `fmap` lift (makeStableName p)
+        bm  <- get
+        mbp <- IntMap.lookup u `fmap` get
+        modify $ IntMap.insert u bp
+        bp  <- case mbp of
+            Just b -> return b
+            Nothing -> Con (Const u) `fmap` case sc of
+                IsoMap iso c -> IsoMap id `fmap` go c
+                Product c d  -> do
+                    bx <- go c
+                    by <- go d
+                    return . coerce $ Product bx by
+                Alter c d -> do
+                    bx <- go c
+                    by <- go d
+                    return $ Alter bx by
+                Empty -> return Empty
+                End   -> return End
+                Nest c -> Nest `fmap` go c
+                -- _            -> return End
+        return bp
+
+-- mapEnd :: (f a -> g a) -> Con f a -> Con g a
+-- mapEnd = mapEnd
+
+-- recursive :: Con f a -> IO (Con f a)
+-- recursive = recursive
+
+-- construct :: Syntax f => Con f a -> f a
+-- construct = \case
+--     End     u fa      -> fa
+--     IsoMap  u iso eqa -> iso <$> construct eqa
+--     Product u eqa eqb -> construct eqa <*> construct eqb
+--     Alter   u eqa eqb -> construct eqa <|> construct eqb
+--     Nest    u
+
+
+data Fragment f where
+    Fragment :: Unique -> f a -> Fragment f
+
+toFrag :: Unique -> f a -> Fragment f
+toFrag = Fragment
+
+fromFrag :: Unique -> Fragment f -> Maybe (f a)
+fromFrag u (Fragment u' fa) | u == u' = Just $ unsafeCoerce fa
+fromFrag _ _                = Nothing
+
 
 -- move :: Monoid a => Struct -> Pos.Path -> Distr a -> Distr a
 -- move st (Pos.Path u x p) = nexts x st . ups' u
@@ -366,7 +492,7 @@ move cm st d = case cm of
 --         emptyXSeq :: Monoid a => Seq.Seq a
 --         emptyXSeq = Seq.replicate (abs x) mempty
 
---     downs :: Pos.Position -> Struct -> Distr a -> Distr a
+--     downs :: Pos.Position -> Struc -> Distr a -> Distr a
 --     downs Seq.Empty _ d = d
 --     downs pos (Distr _ sc) d = case sc of
 --         Cons sx sy ->
@@ -436,39 +562,39 @@ move cm st d = case cm of
 --     EmptyEq   :: Equivalent f g a
     -- RecEq     ::
 
-type Equivalent f g = Con (Equiv f g)
+-- type Equivalent f g = Con (Equiv f g)
 
-data Equiv f g a = Pair (f a) (g a)
+-- data Equiv f g a = Pair (f a) (g a)
 
-instance (IsoFunctor f, IsoFunctor g) => IsoFunctor (Equiv f g) where
-    iso <$> Pair fa ga = Pair (iso <$> fa) (iso <$> ga)
+-- instance (IsoFunctor f, IsoFunctor g) => IsoFunctor (Equiv f g) where
+--     iso <$> Pair fa ga = Pair (iso <$> fa) (iso <$> ga)
 
-instance (ProductFunctor f, ProductFunctor g) =>
-         ProductFunctor (Equiv f g) where
-    Pair fa ga <*> Pair fb gb = Pair (fa <*> fb) (ga <*> gb)
+-- instance (ProductFunctor f, ProductFunctor g) =>
+--          ProductFunctor (Equiv f g) where
+--     Pair fa ga <*> Pair fb gb = Pair (fa <*> fb) (ga <*> gb)
 
-instance (Alter f, Alter g) => Alter (Equiv f g) where
-    empty = Pair empty empty
-    Pair fa ga <|> Pair fb gb = Pair (fa <|> fb) (ga <|> gb)
+-- instance (Alter f, Alter g) => Alter (Equiv f g) where
+--     empty = Pair empty empty
+--     Pair fa ga <|> Pair fb gb = Pair (fa <|> fb) (ga <|> gb)
 
-instance (Syntax f, Syntax g) => Syntax (Equiv f g) where
-    pure a = Pair (pure a) (pure a)
-    char   = Pair char char
-    part d (Pair fa ga) = Pair (part d fa) (part d ga)
+-- instance (Syntax f, Syntax g) => Syntax (Equiv f g) where
+--     pure a = Pair (pure a) (pure a)
+--     char   = Pair char char
+--     part d (Pair fa ga) = Pair (part d fa) (part d ga)
 
-reflexive :: Equivalent f f a
-reflexive = reflexive
+-- reflexive :: Equivalent f f a
+-- reflexive = reflexive
 
-symmetric :: Equivalent f g a -> Equivalent g f a
-symmetric = symmetric
+-- symmetric :: Equivalent f g a -> Equivalent g f a
+-- symmetric = symmetric
 
-transitive :: Equivalent f g a -> Equivalent g h a -> Equivalent f h a
-transitive = transitive
+-- transitive :: Equivalent f g a -> Equivalent g h a -> Equivalent f h a
+-- transitive = transitive
 
-runEquivalent :: (forall x. f x -> g x -> r x)
-              -> Equivalent f g a
-              -> Equivalent r g a
-runEquivalent run = mapEnd $ \(Pair fx gx) -> Pair (run fx gx) gx
+-- runEquivalent :: (forall x. f x -> g x -> r x)
+--               -> Equivalent f g a
+--               -> Equivalent r g a
+-- runEquivalent run = mapEnd $ \(Pair fx gx) -> Pair (run fx gx) gx
 
     -- Equivalent $ case c of
     -- Pure (fa, ga)   -> Pure (run fa ga, ga)
@@ -477,15 +603,15 @@ runEquivalent run = mapEnd $ \(Pair fx gx) -> Pair (run fx gx) gx
     -- Alter   eqa eqb -> runEquivalent run eqa `Alter`   runEquivalent run eqb
     -- Empty           -> Empty
 
-fromEquivalent :: (Syntax f, Syntax g) => Equivalent f g a -> (f a, g a)
-fromEquivalent eq = let Pair fa ga = construct eq
-                    in  (fa, ga)
+-- fromEquivalent :: (Syntax f, Syntax g) => Equivalent f g a -> (f a, g a)
+-- fromEquivalent eq = let Pair fa ga = construct eq
+--                     in  (fa, ga)
 
-end :: f a -> g a -> Equivalent f g a
-end fa ga = End $ Pair fa ga
+-- end :: f a -> g a -> Equivalent f g a
+-- end fa ga = End $ Pair fa ga
 
-endConst :: c -> g a -> Equivalent (Const c) g a
-endConst = end . Const
+-- endConst :: c -> g a -> Equivalent (Const c) g a
+-- endConst = end . Const
 
 -- newtype Foo a = Foo (String -> Diff a)
 
@@ -630,27 +756,27 @@ newtype Reify a = Reify (ReifyF (Reify a))
 --     | GAlter a a
 --     deriving Show
 
-instance MuRef (Reify a) where
-    type DeRef (Reify a) = ReifyF
-    mapDeRef f (Reify r) = traverse f r
+-- instance MuRef (Reify a) where
+--     type DeRef (Reify a) = ReifyF
+--     mapDeRef f (Reify r) = traverse f r
 
-instance IsoFunctor Reify where
-    iso <$> r = unsafeCoerce r
+-- instance IsoFunctor Reify where
+--     iso <$> r = unsafeCoerce r
 
-instance ProductFunctor Reify where
-    rx <*> ry = Reify $ unsafeCoerce $ RProduct rx (unsafeCoerce ry)
+-- instance ProductFunctor Reify where
+--     rx <*> ry = Reify $ unsafeCoerce $ RProduct rx (unsafeCoerce ry)
 
-instance Alter Reify where
-    empty = Reify REmpty
-    rx <|> ry = Reify $ RAlter rx ry
+-- instance Alter Reify where
+--     empty = Reify REmpty
+--     rx <|> ry = Reify $ RAlter rx ry
 
-instance Syntax Reify where
-    pure _ = Reify RUnit
-    char   = Reify RUnit
-    part _ r = Reify $ RSub r
+-- instance Syntax Reify where
+--     pure _ = Reify RUnit
+--     char   = Reify RUnit
+--     part _ r = Reify $ RSub r
 
-reify' :: forall a. (forall f. Syntax f => f a) -> IO (Graph ReifyF)
-reify' p = reifyGraph (p :: Reify a)
+-- reify' :: forall a. (forall f. Syntax f => f a) -> IO (Graph ReifyF)
+-- reify' p = reifyGraph (p :: Reify a)
 
 -- reify :: Archivist f a -> IO ([(Int, String)], String)
 -- reify =  go []
@@ -679,7 +805,6 @@ reify' p = reifyGraph (p :: Reify a)
 
 --                     _ -> return (xs, "U")
 
-data Fragment a = Fragment Unique a
 
 
 class Syntax f => Intermediate f where

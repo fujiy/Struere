@@ -71,10 +71,12 @@ bufferUI window = do
     ic <- keypress <$> getBody window
     kc <- keydown  <$> getBody window
 
-    let Just up = builder test test1
+    bp <- liftIO $ getBlueprint (test :: Con Radiographer Test)
+
+    let Just up = builder bp test test1
         Just st = xray test test1
-        cs      = fromPosition st (Pos.fromList [0, 1]) InsertCaret
-        initc   = Context cs st test1 up test
+        cs      = fromPosition st (fromList [0, 1]) InsertCaret
+        initc   = Context cs st test1 up test bp
         Just iui = render test (carets initc) test1
 
         input   = unionWith const (InputChar <$> ic) (KeyCode <$> kc)
@@ -121,19 +123,26 @@ mainAccum initc charE =
                 Key.ArrowRight -> moveCarets CaretNext context
                 Key.ArrowLeft  -> moveCarets CaretPrev context
                 Key.Delete     -> instrs IDelete context
+                Key.Backspace  -> instrs IDelete context
                 _              -> (context, el)
-            InputChar c -> instrs (ISet $ toDyn c) context
+            InputChar c | isControl c
+                        -> (context, el)
+            InputChar c -> traceShow c $ instrs (ISet $ toDyn c) context
 
 instrs :: Instr -> Context -> (Context, UI Element)
 instrs i context =
-    let is       = traceShowId $ instrOn i <$> carets context
-        (ma, up) = update (updater context) is
-        el       = fromMaybe UI.new $ do
-            a <- ma
-            render (syntax context) (carets context) a
+    let is          = traceShowId $ instrOn i <$> carets context
+        (b, ma, up) = update (updater context) is
         mst      = ma >>= xray (syntax context)
-    in  (context { struct  = fromMaybe (struct context) mst
+        st'      = fromMaybe (struct context) mst
+        cs'      = rail st' (carets context)
+        el          = fromMaybe UI.new $ do
+            a <- ma
+            render (syntax context) cs' a
+            in  traceShow b $
+        (context { struct  = st'
                  , value   = fromMaybe (value  context) ma
+                 , carets  = cs'
                  , updater = up } , el)
 
 instrOn :: Instr -> Caret -> Instr

@@ -1,6 +1,6 @@
 {-# LANGUAGE DeriveFunctor #-}
 
-module Data.Struere.Position where
+module Data.Struere.Position () where
 
 
 import           Data.IntMap        (IntMap)

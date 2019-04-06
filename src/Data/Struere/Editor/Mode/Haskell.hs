@@ -97,7 +97,7 @@ name :: Syntax f => f (Name Info)
 name = ident <$> noInfo <*> identifier <* spaces
 
 identifier :: Syntax f => f String
-identifier = cons <$> letter <*> many alphaNum
+identifier = many alphaNum
              <?> "identifier"
 
 

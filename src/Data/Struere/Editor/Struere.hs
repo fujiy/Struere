@@ -25,11 +25,12 @@ data Input = InputChar Char
     deriving (Eq, Show)
 
 data Context = Context
-    { carets  :: Carets
-    , struct  :: Struct
-    , value   :: Test
-    , updater :: Updater Test
-    , syntax  :: forall f. Syntax f => f Test
+    { carets    :: Carets
+    , struct    :: Struct
+    , value     :: Test
+    , updater   :: Updater Test
+    , syntax    :: forall f. Syntax f => f Test
+    , blueprint :: Blueprint
     }
 
 
