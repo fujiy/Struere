@@ -42,7 +42,10 @@ instance Alter Renderer where
         Renderer $ \cs a -> v cs a `mplus` w cs a
 
 instance Syntax Renderer where
-    pure a = Renderer $ \cs _ -> Just $ return []
+    pure a = Renderer $ \(Distr x _) _ ->
+        if x /= NoCaret
+        then return $ (:[]) `fmap` caret x (UI.span # set UI.html "&ensp;")
+        else Just $ return []
     char   = Renderer $ \(Distr x _) c ->
         Just $ (:[]) `fmap` caret x (UI.span # set UI.text [c])
     part d (Renderer v) = Renderer $ \(Distr x dc) a -> do
@@ -61,7 +64,8 @@ caret c =
         -- (null $ Pos.roots cs)
         (set UI.style
         [ ("background", "black")
-        , ("color",      "white")]
+        , ("color",      "white")
+        ]
         )
     -- u
 

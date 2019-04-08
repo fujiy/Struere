@@ -223,12 +223,12 @@ data CaretMove = CaretUp
 
 move :: Monoid a => CaretMove -> Struct -> Distr a -> Distr a
 move cm st d = case cm of
-    -- CaretStay -> rail
+    -- CaretStay -> rail'
     CaretUp   -> uncurry (narrowFirst st) $ up st d
         -- let (Distr a dc, a') = up st d
         --          in  Distr (a <> a') dc
     CaretDown -> down st d mempty
-    CaretNext -> uncurry (narrowLast  st) $ next st d mempty
+    CaretNext -> uncurry (narrowLast  st) $ next st True d mempty
     CaretPrev -> uncurry (narrowFirst st) $ prev st d mempty
   where
     up :: Monoid a => Struct -> Distr a -> (Distr a, a)
@@ -253,18 +253,22 @@ move cm st d = case cm of
             in  Distr mempty (Cons dx' dy')
         Sub sx     -> Distr a' (Sub (down sx (desub dc) a))
 
-    next :: Monoid a => Struct -> Distr a -> a -> (Distr a, a)
-    next (Distr sz sc) (Distr a dc) a' = case sc of
-        _ | sz == 0 -> ( Distr mempty dc, a <> a' )
+    next :: Monoid a => Struct -> Bool -> Distr a -> a -> (Distr a, a)
+    next (Distr sz sc) isLast (Distr a dc) a' = case sc of
+        _ | sz == 0 && not isLast
+                    -> ( Distr mempty dc, a <> a' )
         Leaf        -> ( Distr a' dc, a )
         Cons sx sy  ->
             let (dx, dy) = deprod dc
-                (dx', b) = next sx dx a'
-                (dy', c) = next sy dy b
+                (dx', b) = next sx False dx a'
+                (dy', c) = next sy isLast dy b
             in  ( Distr mempty (Cons dx' dy'), a <> c )
         Sub sx      ->
-            let (dx', b) = next sx (desub dc) a'
+            let (dx', b) = next sx True (desub dc) a'
             in  ( Distr a' (Sub (narrowLast sx dx' b)), a)
+
+
+                -- ( Distr a' (Sub dx''), a )
 
     prev :: Monoid a => Struct -> Distr a -> a -> (Distr a, a)
     prev (Distr sz sc) (Distr a dc) a' = case sc of
@@ -282,7 +286,7 @@ move cm st d = case cm of
 narrowLast :: Monoid a => Struct -> Distr a -> a -> Distr a
 narrowLast (Distr _ sc) (Distr a dc) a' = case sc of
     Cons sx sy -> let (dx, dy) = deprod dc
-                  in if size sy > 0
+                  in if size sy > 0 || True
                      then Distr a (Cons dx (narrowLast sy dy a'))
                      else Distr a (Cons (narrowLast sx dx a') dy)
     _          -> Distr (a <> a') dc
@@ -295,25 +299,27 @@ narrowFirst (Distr _ sc) (Distr a dc) a' = case sc of
                      else Distr a (Cons dx (narrowFirst sy dy a'))
     _          -> Distr (a <> a') dc
 
-
 rail :: Monoid a => Struct -> Distr a -> Distr a
-rail (Distr _ sc) d@(Distr a dc) = case sc of
+rail st = rail' st True
+
+rail' :: Monoid a => Struct -> Bool -> Distr a -> Distr a
+rail' (Distr _ sc) isLast d@(Distr a dc) = case sc of
     Leaf       -> flatten d
     Cons sx sy | size sx == 0 ->
         let (dx, dy) = deprod dc
-            dy'      = narrowFirst sy (rail sy dy) (flatten' dx)
+            dy'      = narrowFirst sy (rail' sy isLast dy) (flatten' dx)
         in  Distr a (Cons mempty dy')
-    Cons sx sy | size sy == 0 ->
+    Cons sx sy | size sy == 0 && not isLast ->
         let (dx, dy) = deprod dc
-            dx'      = narrowLast sx (rail sx dx) (flatten' dy)
+            dx'      = narrowLast sx (rail' sx False dx) (flatten' dy)
         in  Distr a (Cons dx' mempty)
     Cons sx sy ->
         let (dx, dy) = deprod dc
-            dx'      = rail sx dx
-            dy'      = rail sy dy
+            dx'      = rail' sx False dx
+            dy'      = rail' sy isLast dy
         in  Distr a (Cons dx' dy')
     Sub sx ->
-        let dx' = rail sx $ case dc of
+        let dx' = rail' sx True $ case dc of
                 Cons dx dy -> dx <> dy
                 _          -> desub dc
         in  Distr a (Sub dx')
@@ -686,17 +692,17 @@ fromFrag _ _                = Nothing
 
 -- railTop :: Struct -> Pos.Carets -> Pos.Carets
 -- railTop st cs = Pos.onRoots (Pos.roots cs)
---              <> rail st (Pos.narrow 0 (size st - 1) cs)
+--              <> rail' st (Pos.narrow 0 (size st - 1) cs)
 
--- rail :: Struct -> Pos.Distr () -> Pos.Distr ()
--- rail st p = case substract st of
+-- rail' :: Struct -> Pos.Distr () -> Pos.Distr ()
+-- rail' st p = case substract st of
 --     Unit     -> Pos.bottom p
 --     Sub st'  -> Pos.onRoots (Pos.roots p)
---              <> rail st' (Pos.narrow 0 (size st' - 1) $ Pos.exceptRoots p)
+--              <> rail' st' (Pos.narrow 0 (size st' - 1) $ Pos.exceptRoots p)
 --     Cons _ _ ->
 --         if Pos.null p then p
 --         else let ((sta, stb), (px, py)) = uncons st p
---              in  cons (sta, stb) (rail sta px, rail stb py)
+--              in  cons (sta, stb) (rail' sta px, rail' stb py)
 
 
 

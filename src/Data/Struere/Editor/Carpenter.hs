@@ -59,6 +59,7 @@ data Bubble = BNone
             | BDelete
             | BReplace (Fragment Updater) (Fragment Scaffold)
             | BInsert (Fragment Scaffold)
+            | BReject
             -- | BInsertRec (Fragment Updater) (Fragment Scaffold)
 
 instance Show Bubble where
@@ -197,7 +198,9 @@ instance Syntax (Poly Syntax Builder) where
                          in  return (sa, up sa)
         }
       where
-        up sa = Updater $ const (mempty, sa, up sa)
+        up sa = Updater $ \(Distr x _) -> case x of
+            IInsert fa -> (BInsert fa, sa, up sa)
+            _          -> (mempty, sa, up sa)
 
     char = Poly char $ fix $ \fbl -> Builder
         { build = up
@@ -233,7 +236,7 @@ instance Syntax (Poly Syntax Builder) where
                 --         up' = build bl bp (Just a)
                 --     return (mempty, Just a, upp u bp (Just a) up')
                 IDelete    -> (BDelete, sa, upp u bp sa up)
-                -- IInsert fa -> (BInsert fa, sa, upp u bp sa up)
+                IInsert fa -> (BInsert fa, sa, upp u bp sa up)
                 _ ->
                     let (bx, sa', up') = update up (desub di)
                     in  (bx, sa', upp u bp sa' up')

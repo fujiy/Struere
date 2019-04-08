@@ -154,12 +154,13 @@ view context =
 instrs :: Instr -> Struere ()
 instrs i = do
     context <- State.get
-    let is          = traceShowId $ instrOn i <$> carets context
+    let is          = instrOn i <$> carets context
         (b, sa, up) = update (updater context) is
         mst         = value sa >>= xray (syntax context)
         st'         = fromMaybe (struct context) mst
         cs'         = rail st' (carets context)
-    put context
+    traceShow b $
+        put context
         { struct   = st'
         , scaffold = sa
         , carets   = cs'
@@ -174,7 +175,7 @@ moveCarets :: CaretMove -> Struere ()
 moveCarets mv = do
     context <- State.get
     let cs  = carets context
-        mcs = move mv (struct context) cs
+        mcs = traceShowId $ move mv (struct context) cs
     put context { carets = mcs }
         -- rcs = railTop (struct context) mcs
     -- in trace (unlines $ show (struct context) :  map show [cs, mcs])
