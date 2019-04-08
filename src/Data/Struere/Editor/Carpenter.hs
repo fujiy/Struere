@@ -143,18 +143,17 @@ instance ProductFunctor (Poly Syntax Builder) where
                 (bx, sa, up') = update up lis
                 (by, sb, uq') = update uq ris
                 sab'          = pairSC u sa sb
+                upq'          = upq b sab' up' uq'
                 fup           = toFrag (unique bp) up'
                 fuq           = toFrag (unique bq) uq'
-                upq'          = upq b sab' up' uq'
-                fupq          = toFrag u upq'
                 fsa           = toFrag (unique bp) sa
                 fsb           = toFrag (unique bq) sb
             return . replaceByBubble u $ case (bx, by) of
                 (BDelete, _) ->
-                    (BReplace fuq fsb, sab, upq b sab up' uq')
+                    (BReplace fuq fsb, sab', upq b sab' up' uq')
                 (_, BDelete) ->
-                    (BReplace fup fsa, sab, upq b sab up' uq')
-                (BInsert fa, _) -> fromMaybe (mempty, sab', upq') $ do
+                    (BReplace fup fsa, sab', upq b sab' up' uq')
+                (BInsert fa, _) -> fromMaybe (bx, sab', upq') $ do
                     (sa', up'') <- fill bl bp fa
                     (sb', uq'') <- fill br bq $ toFrag u sab'
                     let sab'' = pairSC u sa' sb'
@@ -239,7 +238,8 @@ instance Syntax (Poly Syntax Builder) where
                 IInsert fa -> (BInsert fa, sa, upp u bp sa up)
                 _ ->
                     let (bx, sa', up') = update up (desub di)
-                    in  (bx, sa', upp u bp sa' up')
+                        sb = Scaffold u (value sa') (Single sa')
+                    in  (bx, sb, upp u bp sa' up')
 
 
 replace :: Unique -> Bubble -> Maybe (Updater a, Scaffold a)

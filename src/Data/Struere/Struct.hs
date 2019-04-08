@@ -361,11 +361,20 @@ coerceSC u iso sb = Scaffold u (value sb >>= apply iso) (Coerce sb)
 depair :: Scaffold (a, b) -> (Scaffold a, Scaffold b)
 depair (Scaffold _ _ (Pair sa sb)) = (sa, sb)
 
+depair' :: Scaffold (a, b) -> Maybe (Scaffold a, Scaffold b)
+depair' (Scaffold _ _ (Pair sa sb)) = Just (sa, sb)
+depair' _                           = Nothing
+
 pairSC :: Unique -> Scaffold a -> Scaffold b -> Scaffold (a, b)
 pairSC u sa sb = Scaffold u (zipMaybe (value sa) (value sb)) (Pair sa sb)
 
 extract :: Scaffold a -> Either (Scaffold a) (Scaffold a)
 extract (Scaffold _ _ (Inject ei)) = ei
+
+extract' :: Scaffold a -> Maybe (Either (Scaffold a) (Scaffold a))
+extract' (Scaffold _ _ (Inject ei)) = Just ei
+extract' _                          = Nothing
+
 
 inL :: Unique -> Scaffold a -> Scaffold a
 inL u sa = Scaffold u (value sa) (Inject (Left sa))
@@ -380,8 +389,13 @@ plusSC sa                 _  = sa
 desingle :: Scaffold a -> Scaffold a
 desingle (Scaffold _ _ (Single sa)) = sa
 
+desingle' :: Scaffold a -> Maybe (Scaffold a)
+desingle' (Scaffold _ _ (Single sa)) = Just sa
+desingle' _                          = Nothing
+
 edgeSC :: Unique -> a -> Scaffold a
 edgeSC u a = Scaffold u (Just a) Edge
+
 
 newtype Scaffolder a = Scaffolder
     { scaffolder :: Blueprint -> a -> Maybe (Scaffold a) }

@@ -79,28 +79,12 @@ bufferUI window = do
         cs      = fromPosition st (fromList [0, 1]) InsertCaret
         Just sa = scaffolder test bp test1
         initc   = Context cs st sa up test bp
-        Just iui = render test (carets initc) test1
 
         input   = unionWith const (InputChar <$> ic) (KeyCode <$> kc)
 
+    el <- renderer test bp cs sa
 
-    -- editorB <- accumB (Editor $ Buffer "test" up) never
-    --     :: UI (Behavior Editor)
-
-    -- rec cb <- do
-    --         let is = instrs (fst <$> cb) key
-    --             update i (context, b) =
-    --                 let (ma, d, cp') = updater (updater context) i
-    --                 in  ( context { updater = cp' }
-    --                     , maybe Empty id $ runViewer test <$> ma )
-    --         accumB (initc, bu) $ update <$> is
-    --             :: UI (Behavior (Context, Brick))
-
-    -- brick <- brick . snd <$> cb
-
-    -- initb <- brick (carets initc) initui
-    el <- iui
-    return buf # set UI.children [el]
+    return buf # set UI.children el
 
     traceShow (carets initc, struct initc) $ return ()
 
@@ -145,10 +129,12 @@ handler = \case
 
 
 view :: Context -> UI Element
-view context =
-    fromMaybe UI.new $ do
-    a <- value $ scaffold context
-    render (syntax context) (carets context) a
+view context = do
+    es <- renderer (syntax context) (blueprint context)
+          (carets context)
+          (scaffold context)
+        -- (fromJust $ scaffolder (syntax context) (blueprint context) (fromJust $ value (scaffold context)))
+    UI.new # set UI.children es
 
 
 instrs :: Instr -> Struere ()
