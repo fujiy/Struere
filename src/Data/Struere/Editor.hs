@@ -18,7 +18,7 @@ import           Prelude                          hiding (pure, (<$>), (<*>))
 import qualified Web.KeyCode                      as Key
 
 import qualified Graphics.UI.Threepenny           as UI
-import           Graphics.UI.Threepenny.Core      hiding (value)
+import           Graphics.UI.Threepenny.Core      hiding (scaffold, value)
 import           Graphics.UI.Threepenny.Events
 
 
@@ -71,12 +71,13 @@ bufferUI window = do
     ic <- keypress <$> getBody window
     kc <- keydown  <$> getBody window
 
-    bp <- liftIO $ getBlueprint (test :: Con Radiographer Test)
+    bp <- liftIO $ getBlueprint test
 
     let Just up = builder bp test test1
         Just st = xray test test1
         cs      = fromPosition st (fromList [0, 1]) InsertCaret
-        initc   = Context cs st test1 up test bp
+        Just sa = scaffolder test bp test1
+        initc   = Context cs st sa up test bp
         Just iui = render test (carets initc) test1
 
         input   = unionWith const (InputChar <$> ic) (KeyCode <$> kc)
@@ -127,21 +128,23 @@ mainAccum initc charE =
                 _              -> (context, el)
             InputChar c | isControl c
                         -> (context, el)
-            InputChar c -> traceShow c $ instrs (ISet $ toDyn c) context
+            InputChar c -> traceShow c $
+                instrs (IInsert $ toFrag tokenUnique (edgeSC tokenUnique c))
+                context
 
 instrs :: Instr -> Context -> (Context, UI Element)
 instrs i context =
     let is          = traceShowId $ instrOn i <$> carets context
-        (b, ma, up) = update (updater context) is
-        mst      = ma >>= xray (syntax context)
+        (b, sa, up) = update (updater context) is
+        mst      = value sa >>= xray (syntax context)
         st'      = fromMaybe (struct context) mst
         cs'      = rail st' (carets context)
         el          = fromMaybe UI.new $ do
-            a <- ma
+            a <- value sa
             render (syntax context) cs' a
             in  traceShow b $
         (context { struct  = st'
-                 , value   = fromMaybe (value  context) ma
+                 , scaffold = sa
                  , carets  = cs'
                  , updater = up } , el)
 
@@ -157,7 +160,8 @@ moveCarets mv context =
         -- rcs = railTop (struct context) mcs
     in trace (unlines $ show (struct context) :  map show [cs, mcs])
         ( context { carets = mcs }
-        , fromMaybe UI.new $ render (syntax context) mcs (value context)
+        , fromMaybe UI.new $ render (syntax context) mcs =<<
+          (value $ scaffold context)
         )
 
 -- instrs :: Behavior Context -> Event Char -> Event Instrs

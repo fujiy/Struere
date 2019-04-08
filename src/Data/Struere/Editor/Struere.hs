@@ -27,7 +27,7 @@ data Input = InputChar Char
 data Context = Context
     { carets    :: Carets
     , struct    :: Struct
-    , value     :: Test
+    , scaffold  :: Scaffold Test
     , updater   :: Updater Test
     , syntax    :: forall f. Syntax f => f Test
     , blueprint :: Blueprint

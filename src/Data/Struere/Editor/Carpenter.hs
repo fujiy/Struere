@@ -35,10 +35,13 @@ import           Data.Struere.Util
 data Instr = INone
            | IDelete
            | ISet Dynamic
-           | IInsert Dynamic
+           | IInsert (Fragment Scaffold)
            deriving (Show)
 
 type Instrs = Distr Instr
+
+instance Show (Fragment Scaffold) where
+    show _ = "<<fragment>>"
 
 instance Semigroup Instr where
     INone <> x     = x
@@ -54,12 +57,15 @@ noInstr _     = False
 
 data Bubble = BNone
             | BDelete
-            | BReplace (Fragment Updater) (Fragment Maybe)
+            | BReplace (Fragment Updater) (Fragment Scaffold)
+            | BInsert (Fragment Scaffold)
+            -- | BInsertRec (Fragment Updater) (Fragment Scaffold)
 
 instance Show Bubble where
     show BNone          = "BNone"
     show BDelete        = "BDelete"
     show (BReplace _ _) = "BReplace"
+    show (BInsert _)    = "BInsert"
 
 instance Semigroup Bubble where
     BNone <> x     = x
@@ -69,128 +75,186 @@ instance Monoid Bubble where
     mempty = BNone
 
 
-newtype Builder a = Builder
-    { build :: Blueprint -> Maybe a -> Updater a }
+data Builder a = Builder
+    { build :: Blueprint -> Scaffold a -> Updater a
+    , fill  :: Blueprint -> Fragment Scaffold -> Maybe (Scaffold a, Updater a)
+    }
 
 newtype Updater a = Updater
-    { update :: Instrs -> (Bubble, Maybe a, Updater a) }
+    { update :: Instrs -> (Bubble, Scaffold a, Updater a) }
 
 
 builder :: forall a. Blueprint -> (forall f. Syntax f => f a) -> a
         -> Maybe (Updater a)
 builder bp p a = do
     st <- xray p a
+    sa <- scaffolder p bp a
     let bl = mono (p :: Poly Syntax Builder a)
-    return $ build bl bp (Just a)
+    return $ build bl bp sa
 
 instance IsoFunctor (Poly Syntax Builder) where
     iso <$> Poly p bl = Poly (iso <$> p) $
-        Builder $ \(~(BIsoMap u bp)) mb ->
-            let ma  = mb >>= unapply iso
-                iua = build bl bp ma
-            in ub u iua
+        fix $ \fbl -> Builder
+        { build = \(BIsoMap u bp) (decoerce u -> Just sb) ->
+                up u $ build bl bp sb
+        , fill = filler fbl $
+            \(BIsoMap u bp) fs -> do
+                (sa, ua) <- fill bl bp fs
+                return (coerceSC u iso sa, up u ua)
+        }
       where
-        ub u ua = Updater $ \is ->
-            let (b, ma, ua') = update ua is
-                mb       = ma >>= apply iso
-            in replaceByBubble u (b, mb, ub u ua')
-
+        up u ua = Updater $ \is ->
+            let (b, sa, ua') = update ua is
+                sb       = coerceSC u iso sa
+            in replaceByBubble u (b, sb, up u ua')
 
 
 instance ProductFunctor (Poly Syntax Builder) where
     Poly p bl <*> Poly q br = Poly (p <*> q) $
-        Builder $ \b mab ->
-            let ~(BProduct u bp bq) = b
-                (ma, mb) = unzipMaybe mab
-                iup      = build bl bp ma
-                iuq      = build br bq mb
-            in  upq b mab iup iuq
+        fix $ \fbl -> Builder
+        { build = \b sab ->
+                let ~(BProduct u bp bq) = b
+                    (sa, sb) = depair sab
+                    iup      = build bl bp sa
+                    iuq      = build br bq sb
+                in  upq b sab iup iuq
+        , fill = filler fbl $
+            \b@(BProduct u bp bq) fs ->
+                (do  (sa, up) <- fill bl bp fs
+                     let sb  = novalue $ unique bq
+                         sab = pairSC u sa sb
+                         uq  = build br bq sb
+                     return (sab, upq b sab up uq))
+                -- `mplus`
+                -- (do  (sb, uq) <- fill br bq fs
+                --      let sa  = novalue $ unique bp
+                --          sab = pairSC u sa sb
+                --          up  = build bl bp sa
+                --      return (sab, upq b sab up uq))
+
+        }
       where
-        upq b mab up uq = Updater $ \(Distr x di) ->
-            fromMaybe (mempty, mab, upq b mab up uq) $ do
+        upq b sab up uq = Updater $ \(Distr x di) ->
+            fromMaybe (traceShow "NO" (mempty, sab, upq b sab up uq)) $ do
             -- guard $ not $ Pos.null is
             let ~(BProduct u bp bq) = b
                 (lis, ris)    = deprod di
-                (bx, ma, up') = update up lis
-                (by, mb, uq') = update uq ris
-                mab'          = zipMaybe ma mb
+                (bx, sa, up') = update up lis
+                (by, sb, uq') = update uq ris
+                sab'          = pairSC u sa sb
                 fup           = toFrag (unique bp) up'
                 fuq           = toFrag (unique bq) uq'
-                fma           = toFrag (unique bp) ma
-                fmb           = toFrag (unique bq) mb
+                upq'          = upq b sab' up' uq'
+                fupq          = toFrag u upq'
+                fsa           = toFrag (unique bp) sa
+                fsb           = toFrag (unique bq) sb
             return . replaceByBubble u $ case (bx, by) of
                 (BDelete, _) ->
-                    (BReplace fuq fmb, mab, upq b mab up uq)
+                    (BReplace fuq fsb, sab, upq b sab up' uq')
                 (_, BDelete) ->
-                    (BReplace fup fma, mab, upq b mab up uq)
-                _   -> (bx <> by, mab', upq b mab' up' uq')
+                    (BReplace fup fsa, sab, upq b sab up' uq')
+                (BInsert fa, _) -> fromMaybe (mempty, sab', upq') $ do
+                    (sa', up'') <- fill bl bp fa
+                    (sb', uq'') <- fill br bq $ toFrag u sab'
+                    let sab'' = pairSC u sa' sb'
+                        upq'' = upq b sab'' up'' uq''
+                    return (mempty, sab'', upq'')
+                _   -> (bx <> by, sab', upq')
 
 instance Alter (Poly Syntax Builder) where
-    empty = Poly empty $ Builder $ \_ _ -> up
+    empty = Poly empty $ Builder
+        { build = \_ sa -> up sa
+        , fill  = \_ _ -> Nothing
+        }
       where
-        up = Updater $ const (mempty, Nothing, up)
+        up sa = Updater $ const (mempty, sa, up sa)
 
-    ~(Poly p bl) <|> ~(Poly q br) = Poly (p <|> q) $
-        Builder $ \(~(BAlter u bp bq)) ma ->
-            upq u ma ma (build bl bp ma) (build br bq ma)
+    ~(Poly p bl) <|> ~(Poly q br) = Poly (p <|> q)
+        $ fix $ \fbl -> Builder
+        { build = \(~(BAlter u bp bq)) se ->
+                case extract se of
+                    Left  sa -> upq u (Left  sa) (build bl bp sa)
+                    Right sa -> upq u (Right sa) (build br bq sa)
+        , fill = filler fbl $ \(BAlter u bp bq) fs ->
+                (do  (sa, up) <- fill bl bp fs
+                     return (inL u sa, upq u (Left sa) up))
+                `mplus`
+                (do  (sa, uq) <- fill br bq fs
+                     return (inR u sa, upq u (Right sa) uq))
+        }
       where
-        upq u ma mb up uq = Updater $ \is ->
-            replaceByBubble u .
-            fromMaybe (mempty, ma, upq u ma mb up uq) $ do
-                -- guard $ not $ Pos.null is
-                let (bx, ma', up') = maybe (mempty, ma, up)
-                                     (const $ update up is) ma
-                    (by, mb', uq') = maybe (mempty, mb, uq)
-                                     (const $ update uq is) mb
-                return (bx <> by, ma' `mplus` mb', upq u ma' mb' up' uq')
-
+        upq u es up = Updater $ \is ->
+            replaceByBubble u $ case es of
+            Left  sa -> let (ba, sa', up') = update up is
+                        in  (ba, inL u sa', upq u (Left sa') up')
+            Right sa -> let (ba, sa', up') = update up is
+                        in  (ba, inR u sa', upq u (Right sa') up')
 
 instance Syntax (Poly Syntax Builder) where
-    pure a = Poly (pure a) $ Builder $ \_ ma ->
-        let ma' = if Just a == ma then ma else Nothing
-        in  up ma'
+    pure a = Poly (pure a) Builder
+        { build = \_ sa -> up sa
+        , fill = \b _ -> let sa = Scaffold (unique b) (Just a) Edge
+                         in  return (sa, up sa)
+        }
       where
-        up mt = Updater $ const (mempty, mt, up mt)
+        up sa = Updater $ const (mempty, sa, up sa)
 
-    char = Poly char $ Builder $ \_ mc -> up mc
+    char = Poly char $ fix $ \fbl -> Builder
+        { build = up
+        , fill = filler fbl $ \_ _ -> Nothing
+        }
       where
-        up mc = Updater $ \(Distr x _) -> case x of
-            ISet d  -> maybe (mempty, mc, up mc)
-                       (\c -> (mempty, Just c, up (Just c)))
+        up b sc = Updater $ \(Distr x _) -> case x of
+            ISet d  -> maybe (traceShow "NO" (mempty, sc, up b sc))
+                       (\c -> let sc' = Scaffold (unique b) c Edge
+                              in (mempty, sc', up b sc'))
                        (fromDynamic d)
-            IDelete -> (BDelete, Nothing, up Nothing)
-            -- IInsert d -> _
-            _       -> (mempty, mc, up mc)
+            IDelete -> (BDelete, sc, up b sc)
+            IInsert fa -> (BInsert fa, sc, up b sc)
+            _       -> (mempty, sc, up b sc)
 
-    part d (Poly p bl) = Poly (part d p) $
-        Builder $ \bp ma ->
+    part d (Poly p bl) = Poly (part d p) $ fix $ \fbl -> Builder
+        { build = \bp sa ->
             let ~(BNest u bq) = bp
-                iup = build bl bq ma
-            in  upp u bp ma iup
+                iup = build bl bq (desingle sa)
+            in  upp u bp sa iup
+        , fill = filler fbl $ \b@(BNest u bp) fs -> do
+                (sa, up) <- fill bl bp fs
+                let sb = Scaffold u (value sa) (Single sa)
+                return (sb, upp u b sb up)
+        }
       where
-        upp u bp ma up = Updater $ \(Distr x di) ->
+        upp u bp sa up = Updater $ \(Distr x di) ->
             replaceByBubble u $ case x of
-                ISet d -> fromMaybe (mempty, ma, upp u bp ma up) $ do
-                    a <- fromDynamic d
-                    let
-                        -- bl  = p :: Poly Syntax Builder a
-                        up' = build bl bp (Just a)
-                    return (mempty, Just a, upp u bp (Just a) up')
-                IDelete -> (mempty, Nothing, upp u bp Nothing up)
+                -- ISet d -> fromMaybe (mempty, sa, upp u bp sa up) $ do
+                --     a <- fromDynamic d
+                --     let
+                --         -- bl  = p :: Poly Syntax Builder a
+                --         up' = build bl bp (Just a)
+                --     return (mempty, Just a, upp u bp (Just a) up')
+                IDelete    -> (BDelete, sa, upp u bp sa up)
+                -- IInsert fa -> (BInsert fa, sa, upp u bp sa up)
                 _ ->
-                    let (bx, ma', up') = update up (desub di)
-                    in  (bx, ma', upp u bp ma' up')
+                    let (bx, sa', up') = update up (desub di)
+                    in  (bx, sa', upp u bp sa' up')
 
 
-replace :: Unique -> Bubble -> Maybe (Updater a, Maybe a)
+replace :: Unique -> Bubble -> Maybe (Updater a, Scaffold a)
 replace u (BReplace fup fma) = zipMaybe (fromFrag u fup) (fromFrag u fma)
 replace u _                  = Nothing
 
-replaceByBubble :: Unique -> (Bubble, Maybe a, Updater a)
-                -> (Bubble, Maybe a, Updater a)
-replaceByBubble u (replace u -> Just (up, ma), _, _) = (mempty, ma, up)
+replaceByBubble :: Unique -> (Bubble, Scaffold a, Updater a)
+                -> (Bubble, Scaffold a, Updater a)
+replaceByBubble u (replace u -> Just (up, sa), _, _) = (mempty, sa, up)
 replaceByBubble u r                                  = r
 
+filler :: Builder a
+       -> (Blueprint -> Fragment Scaffold -> Maybe (Scaffold a, Updater a))
+       -> Blueprint -> Fragment Scaffold -> Maybe (Scaffold a, Updater a)
+filler bl up b fs =
+    case fromFrag (unique b) fs of
+        Nothing -> up b fs
+        Just sa -> Just (sa, build bl b sa)
 
 
 

@@ -40,6 +40,10 @@ natLT _        _        = False
 mapFst :: (a -> c) -> (a, b) -> (c, b)
 mapFst f (a, b) = (f a, b)
 
+mapSnd :: (b -> c) -> (a, b) -> (a, c)
+mapSnd f (a, b) = (a, f b)
+
+
 applyWhen :: Bool -> (a -> a) -> a -> a
 applyWhen True  f a = f a
 applyWhen False _ a = a

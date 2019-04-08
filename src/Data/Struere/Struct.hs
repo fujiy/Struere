@@ -31,6 +31,7 @@ import           Control.Monad.State.Strict
 -- import           Data.Coerce
 import           Data.IntMap                (IntMap)
 import qualified Data.IntMap                as IntMap
+import qualified Data.IntSet                as IntSet
 import           Data.Maybe
 import qualified Data.Sequence              as Seq
 import           Prelude                    hiding (id, product, pure, (.),
@@ -71,7 +72,8 @@ fromList = Seq.fromList
 
 -- |Distr
 
-data Distr a = Distr a (Child a) deriving (Eq, Show, Functor, Foldable)
+data Distr a = Distr a (Child a)
+    deriving (Eq, Show, Functor, Foldable)
 
 data Child a = Leaf
              | Cons (Distr a) (Distr a)
@@ -316,12 +318,101 @@ rail (Distr _ sc) d@(Distr a dc) = case sc of
                 _          -> desub dc
         in  Distr a (Sub dx')
 
--- |Con
 
--- data Archivist f a = Archivist
---     { finished     :: f a
---     , constitution :: Con f a
---     }
+-- |Scaffold
+
+data Scaffold a = Scaffold
+    { uniq  :: Unique
+    , value :: Maybe a
+    , clamp :: Clamp a
+    }
+
+data Clamp a where
+    Coerce :: Scaffold b -> Clamp a
+    Edge   :: Clamp a
+    Pair   :: Scaffold a -> Scaffold b -> Clamp (a, b)
+    Inject :: Either (Scaffold a) (Scaffold a) -> Clamp a
+    Single :: Scaffold a -> Clamp a
+
+instance Show (Clamp a) where
+    show (Coerce _) = "Coerce"
+    show Edge       = "Edge"
+    show (Pair _ _) = "Pair"
+    show (Inject _) = "Inject"
+    show (Single _) = "Single"
+
+novalue :: Unique -> Scaffold a
+novalue u = Scaffold u Nothing Edge
+
+decoerce :: Unique -> Scaffold a -> Maybe (Scaffold b)
+decoerce u (Scaffold u' ma (Coerce sb)) | u == u'
+             = Just (unsafeCoerce sb)
+decoerce u _ = traceShow u Nothing
+
+coerceSC :: Unique -> Iso a b -> Scaffold a -> Scaffold b
+coerceSC u iso sb = Scaffold u (value sb >>= apply iso) (Coerce sb)
+
+depair :: Scaffold (a, b) -> (Scaffold a, Scaffold b)
+depair (Scaffold _ _ (Pair sa sb)) = (sa, sb)
+
+pairSC :: Unique -> Scaffold a -> Scaffold b -> Scaffold (a, b)
+pairSC u sa sb = Scaffold u (zipMaybe (value sa) (value sb)) (Pair sa sb)
+
+extract :: Scaffold a -> Either (Scaffold a) (Scaffold a)
+extract (Scaffold _ _ (Inject ei)) = ei
+
+inL :: Unique -> Scaffold a -> Scaffold a
+inL u sa = Scaffold u (value sa) (Inject (Left sa))
+
+inR :: Unique -> Scaffold a -> Scaffold a
+inR u sa = Scaffold u (value sa) (Inject (Right sa))
+
+plusSC :: Scaffold a -> Scaffold a -> Scaffold a
+plusSC (value -> Nothing) sa = sa
+plusSC sa                 _  = sa
+
+desingle :: Scaffold a -> Scaffold a
+desingle (Scaffold _ _ (Single sa)) = sa
+
+edgeSC :: Unique -> a -> Scaffold a
+edgeSC u a = Scaffold u (Just a) Edge
+
+newtype Scaffolder a = Scaffolder
+    { scaffolder :: Blueprint -> a -> Maybe (Scaffold a) }
+
+instance IsoFunctor Scaffolder where
+    iso <$> sc = Scaffolder $ \(BIsoMap u bp) a -> do
+        b  <- unapply iso a
+        sb <- scaffolder sc bp b
+        return $ Scaffold u (Just a) (Coerce sb)
+
+instance ProductFunctor Scaffolder where
+    sc <*> sd = Scaffolder $ \(BProduct u bp bq) (a, b) -> do
+        sa <- scaffolder sc bp a
+        sb <- scaffolder sd bq b
+        return $ Scaffold u (Just (a, b)) (Pair sa sb)
+
+instance Alter Scaffolder where
+    empty     = Scaffolder $ \_ a -> Nothing
+    sc <|> sd = Scaffolder $ \(~(BAlter u bp bq)) a ->
+        (do sa <- scaffolder sc bp a
+            return $ Scaffold u (Just a) (Inject (Left sa)))
+        `mplus`
+        (do sa <- scaffolder sd bq a
+            return $ Scaffold u (Just a) (Inject (Right sa)))
+
+instance Syntax Scaffolder where
+    pure a = Scaffolder $ \(BEnd u) a' ->
+        if a == a' then return $ Scaffold u (Just a) Edge
+                   else Nothing
+    char = Scaffolder $ \(BEnd u) c ->
+        return $ Scaffold u (Just c) Edge
+
+    part d sc = Scaffolder $ \(BNest u bp) a -> do
+        sa <- scaffolder sc bp a
+        return $ Scaffold u (Just a) (Single sa)
+
+-- |Con
 
 data Con f a = Con
     { fin    :: f a
@@ -337,6 +428,7 @@ data SubCon f a where
     End     :: SubCon f a
     -- Token   :: Con f Char
     Nest    :: Con f a -> SubCon f a
+
 
     -- Rec     :: Int -> Con f a
 
@@ -373,7 +465,28 @@ pattern BAlter u x y <- Con (Const u) (Alter x y)
 
 pattern BNest u x <- Con (Const u) (Nest x)
 
+pattern BEnd u <- Con (Const u) End
+
 type Blueprint = Con (Const Unique) ()
+
+showB :: Blueprint -> String
+showB = go IntSet.empty
+  where
+    go :: IntSet.IntSet -> Con (Const Unique) a -> String
+    go us (Con (Const u) sc) =
+        let us' = IntSet.insert u us
+            go' :: forall a. Con (Const Unique) a -> String
+            go' a = if u `IntSet.member` us
+                    then ""
+                    else go us' a
+            s   = case sc of
+                IsoMap _ x  -> "IsoMap" ++ go' x
+                Product x y -> "Alter"  ++ go' x ++ go' y
+                Alter x y   -> "Alter"  ++ go' x ++ go' y
+                Empty       -> "Empty"
+                End         -> "End"
+                Nest x      -> "Nest" ++ go' x
+        in "(" ++ show u ++ " " ++ s ++ ")"
 
 unique :: Blueprint -> Unique
 unique (Con (Const u) _) = u
@@ -384,17 +497,26 @@ coerceBProduct = unsafeCoerce
 coerce :: SubCon (Const Unique) a -> SubCon (Const Unique) b
 coerce = unsafeCoerce
 
-getBlueprint :: Syntax f => Con f a -> IO Blueprint
-getBlueprint c = evalStateT (go c) IntMap.empty
+getBlueprint :: forall a. Con BP a -> IO Blueprint
+getBlueprint c = do
+    (b, m) <- runStateT (go c) IntMap.empty
+    _ <- getUnique ()
+        -- (do let Con p _ = char :: Con BP Char
+        --     tu <- lift $ getUnique p
+        --     modify $ IntMap.insert tu (Con (Const tu) End)
+        --     b  <- go c
+        --     return (tu, b)) IntMap.empty
+    trace (showB b) $ return b
   where
-    go :: Con f a -> StateT (UniqueMap Blueprint) IO Blueprint
+    go :: forall a. Con BP a -> StateT (UniqueMap Blueprint) IO Blueprint
+    go (Con BPChar sc) = return $ Con (Const tokenUnique) End
     go (Con p sc) = mdo
-        u   <- hashStableName `fmap` lift (makeStableName p)
+        u   <- lift $ getUnique p
         bm  <- get
         mbp <- IntMap.lookup u `fmap` get
         modify $ IntMap.insert u bp
         bp  <- case mbp of
-            Just b -> return b
+            Just b  -> return b
             Nothing -> Con (Const u) `fmap` case sc of
                 IsoMap iso c -> IsoMap id `fmap` go c
                 Product c d  -> do
@@ -411,6 +533,44 @@ getBlueprint c = evalStateT (go c) IntMap.empty
                 -- _            -> return End
         return bp
 
+tokenUnique :: Unique
+tokenUnique = 0
+
+getUnique :: a -> IO Unique
+getUnique a = hashStableName `fmap` makeStableName a
+
+data BP a = BPChar
+          | BPZero
+          | BPOne (BP a)
+          | BPTwo (BP a) (BP a)
+
+instance IsoFunctor BP where
+    iso <$> b = BPOne $ unsafeCoerce b
+
+instance ProductFunctor BP where
+    (<*>) = unsafeCoerce BPTwo
+
+instance Alter BP where
+    empty = BPZero
+    (<|>) = unsafeCoerce BPTwo
+
+instance Syntax BP where
+    pure a   = BPZero
+    char     = BPChar
+    part _   = BPOne
+
+-- data DynStableName = DynStableName (StableName ())
+
+-- hashDynStableName :: DynStableName -> Int
+-- hashDynStableName (DynStableName sn) = hashStableName sn
+
+-- instance Eq DynStableName where
+--     (DynStableName sn1) == (DynStableName sn2) = sn1 == sn2
+
+-- makeDynStableName :: a -> IO DynStableName
+-- makeDynStableName a = do
+--     st <- makeStableName a
+--     return $ DynStableName (unsafeCoerce st)
 -- mapEnd :: (f a -> g a) -> Con f a -> Con g a
 -- mapEnd = mapEnd
 
