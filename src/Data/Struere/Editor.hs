@@ -7,6 +7,7 @@ module Data.Struere.Editor
     ) where
 
 import           Control.Monad
+import           Control.Monad.State              as State
 import qualified Data.ByteString.Lazy             as BS
 import           Data.Char
 import           Data.Dynamic
@@ -105,64 +106,82 @@ bufferUI window = do
 
     mainB <- mainAccum initc input
 
-    onChanges mainB $ \(c, ui) -> do
+    onChanges mainB $ \io -> do
         -- b <- brick (carets c) a
-        el <- ui
+        el <- liftIO io >>= view
         return buf # set UI.children [el]
 
     -- return buf # sink UI.children (_ (:[]) . brick . snd <$> cb)
 
     return buf
 
-mainAccum :: Context -> Event Input -> UI (Behavior (Context, UI Element))
+mainAccum :: Context -> Event Input -> UI (Behavior (IO Context))
 mainAccum initc charE =
-    accumB (initc, UI.new) $ (`fmap` charE) $ \input (context, el) ->
-        case input of
-            KeyCode c -> case Key.keyCodeLookup c of
-                Key.ArrowUp    -> moveCarets CaretUp   context
-                Key.ArrowDown  -> moveCarets CaretDown context
-                Key.ArrowRight -> moveCarets CaretNext context
-                Key.ArrowLeft  -> moveCarets CaretPrev context
-                Key.Delete     -> instrs IDelete context
-                Key.Backspace  -> instrs IDelete context
-                _              -> (context, el)
-            InputChar c | isControl c
-                        -> (context, el)
-            InputChar c -> traceShow c $
-                instrs (IInsert $ toFrag tokenUnique (edgeSC tokenUnique c))
-                context
+    accumB (return initc) $ (`fmap` charE) $
+    \input m -> do
+        context <- m
+        execStateT (handler input) context
 
-instrs :: Instr -> Context -> (Context, UI Element)
-instrs i context =
+handler :: Input -> Struere ()
+handler = \case
+    KeyCode c -> case Key.keyCodeLookup c of
+        Key.ArrowUp    -> moveCarets CaretUp
+        Key.ArrowDown  -> moveCarets CaretDown
+        Key.ArrowRight -> moveCarets CaretNext
+        Key.ArrowLeft  -> moveCarets CaretPrev
+        Key.Delete     -> instrs IDelete
+        Key.Backspace  -> do
+            cs <- carets `fmap` State.get
+            instrs IDelete
+            modify $ \c -> c {carets = cs}
+            moveCarets CaretPrev
+        _              -> return ()
+    InputChar c | isControl c
+                  -> return ()
+    InputChar c -> do
+        instrs (IInsert $ toFrag tokenUnique (edgeSC tokenUnique c))
+        moveCarets CaretNext
+
+
+
+view :: Context -> UI Element
+view context =
+    fromMaybe UI.new $ do
+    a <- value $ scaffold context
+    render (syntax context) (carets context) a
+
+
+instrs :: Instr -> Struere ()
+instrs i = do
+    context <- State.get
     let is          = traceShowId $ instrOn i <$> carets context
         (b, sa, up) = update (updater context) is
-        mst      = value sa >>= xray (syntax context)
-        st'      = fromMaybe (struct context) mst
-        cs'      = rail st' (carets context)
-        el          = fromMaybe UI.new $ do
-            a <- value sa
-            render (syntax context) cs' a
-            in  traceShow b $
-        (context { struct  = st'
-                 , scaffold = sa
-                 , carets  = cs'
-                 , updater = up } , el)
+        mst         = value sa >>= xray (syntax context)
+        st'         = fromMaybe (struct context) mst
+        cs'         = rail st' (carets context)
+    put context
+        { struct   = st'
+        , scaffold = sa
+        , carets   = cs'
+        , updater  = up }
 
 instrOn :: Instr -> Caret -> Instr
 instrOn i NoCaret = mempty
 instrOn i _       = i
 
 
-moveCarets :: CaretMove -> Context -> (Context, UI Element)
-moveCarets mv context =
+moveCarets :: CaretMove -> Struere ()
+moveCarets mv = do
+    context <- State.get
     let cs  = carets context
         mcs = move mv (struct context) cs
+    put context { carets = mcs }
         -- rcs = railTop (struct context) mcs
-    in trace (unlines $ show (struct context) :  map show [cs, mcs])
-        ( context { carets = mcs }
-        , fromMaybe UI.new $ render (syntax context) mcs =<<
-          (value $ scaffold context)
-        )
+    -- in trace (unlines $ show (struct context) :  map show [cs, mcs])
+    --     ( context { carets = mcs }
+    --     , fromMaybe UI.new $ render (syntax context) mcs =<<
+    --       (value $ scaffold context)
+    --     )
 
 -- instrs :: Behavior Context -> Event Char -> Event Instrs
 -- instrs contextB charE =

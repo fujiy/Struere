@@ -39,9 +39,10 @@ data Context = Context
 --     , carpenter :: Carpenter Test
 --     }
 
-newtype Struere a = Struere
-    { runStruere :: Context -> (a, Context) }
-    deriving (Functor)
+-- |Struere Monad
+
+type Struere = StateT Context IO
+
 
 -- instance Applicative Struere where
 --     pure a = Struere $ \c e -> (a, c, e)
