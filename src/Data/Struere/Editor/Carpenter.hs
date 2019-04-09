@@ -11,6 +11,7 @@ module Data.Struere.Editor.Carpenter where
 
 import           Control.Applicative      (Const (..))
 import           Control.Monad
+import           Data.Either
 import           Data.Function
 import           Data.Maybe
 import           Prelude                  hiding (id, pure, (<$>), (<*>))
@@ -55,10 +56,15 @@ noInstr INone = True
 noInstr _     = False
 
 
+data Fill = FOne  (Fragment Scaffold)
+          | FCons (Fragment Scaffold) (Fragment Scaffold)
+
+
 data Bubble = BNone
             | BDelete
             | BReplace (Fragment Updater) (Fragment Scaffold)
             | BInsert (Fragment Scaffold)
+            | BAppend (Fragment Scaffold) (Fragment Scaffold)
             | BReject
             -- | BInsertRec (Fragment Updater) (Fragment Scaffold)
 
@@ -78,7 +84,7 @@ instance Monoid Bubble where
 
 data Builder a = Builder
     { build :: Blueprint -> Scaffold a -> Updater a
-    , fill  :: Blueprint -> Fragment Scaffold -> Maybe (Scaffold a, Updater a)
+    , fill  :: Blueprint -> Fill -> Maybe (Scaffold a, Updater a)
     }
 
 newtype Updater a = Updater
@@ -120,18 +126,27 @@ instance ProductFunctor (Poly Syntax Builder) where
                     iuq      = build br bq sb
                 in  upq b sab iup iuq
         , fill = filler fbl $
-            \b@(BProduct u bp bq) fs ->
-                (do  (sa, up) <- fill bl bp fs
-                     let sb  = novalue $ unique bq
-                         sab = pairSC u sa sb
-                         uq  = build br bq sb
-                     return (sab, upq b sab up uq))
+            \b@(BProduct u bp bq) fl ->
+                case fl of
+                    FOne fs ->
+                        (do (sa, up) <- fill bl bp fl
+                            let sb  = novalue $ unique bq
+                                sab = pairSC u sa sb
+                                uq  = build br bq sb
+                            return (sab, upq b sab up uq))
                 -- `mplus`
                 -- (do  (sb, uq) <- fill br bq fs
                 --      let sa  = novalue $ unique bp
                 --          sab = pairSC u sa sb
                 --          up  = build bl bp sa
                 --      return (sab, upq b sab up uq))
+                    FCons fa fb -> traceShow "fcons" $ do
+                        (sa, up) <- traceShow "a" $ fill bl bp $ FOne fa
+                        (sb, uq) <- traceShow "b" $ fill br bq $ FOne fb
+                        let sab = pairSC u sa sb
+                        return (sab, upq b sab up uq)
+
+
 
         }
       where
@@ -154,8 +169,8 @@ instance ProductFunctor (Poly Syntax Builder) where
                 (_, BDelete) ->
                     (BReplace fup fsa, sab', upq b sab' up' uq')
                 (BInsert fa, _) -> fromMaybe (bx, sab', upq') $ do
-                    (sa', up'') <- fill bl bp fa
-                    (sb', uq'') <- fill br bq $ toFrag u sab'
+                    (sa', up'') <- fill bl bp $ FOne fa
+                    (sb', uq'') <- fill br bq $ FOne $ toFrag u sab'
                     let sab'' = pairSC u sa' sb'
                         upq'' = upq b sab'' up'' uq''
                     return (mempty, sab'', upq'')
@@ -171,24 +186,36 @@ instance Alter (Poly Syntax Builder) where
 
     ~(Poly p bl) <|> ~(Poly q br) = Poly (p <|> q)
         $ fix $ \fbl -> Builder
-        { build = \(~(BAlter u bp bq)) se ->
+        { build = \b@(~(BAlter u bp bq)) se ->
                 case extract se of
-                    Left  sa -> upq u (Left  sa) (build bl bp sa)
-                    Right sa -> upq u (Right sa) (build br bq sa)
-        , fill = filler fbl $ \(BAlter u bp bq) fs ->
-                (do  (sa, up) <- fill bl bp fs
-                     return (inL u sa, upq u (Left sa) up))
+                    Left  sa -> upq b (Left  sa) (build bl bp sa)
+                    Right sa -> upq b (Right sa) (build br bq sa)
+        , fill = filler fbl $ \b@(~(BAlter u bp bq)) fs ->
+                (do (sa, up) <- fill bl bp fs
+                    return (inL u sa, upq b (Left sa) up))
                 `mplus`
-                (do  (sa, uq) <- fill br bq fs
-                     return (inR u sa, upq u (Right sa) uq))
+                (do (sa, uq) <- fill br bq fs
+                    return (inR u sa, upq b (Right sa) uq))
         }
       where
-        upq u es up = Updater $ \is ->
-            replaceByBubble u $ case es of
-            Left  sa -> let (ba, sa', up') = update up is
-                        in  (ba, inL u sa', upq u (Left sa') up')
-            Right sa -> let (ba, sa', up') = update up is
-                        in  (ba, inR u sa', upq u (Right sa') up')
+        upq b@(BAlter u bp bq) es up = Updater $ \is ->
+            replaceByBubble u $
+            let (ba', saa, upp) = case es of
+                    Left  sa -> let (ba, sa', up') = update up is
+                                in  (ba, inL u sa', upq b (Left sa') up')
+                    Right sa -> let (ba, sa', up') = update up is
+                                in  (ba, inR u sa', upq b (Right sa') up')
+            in case ba' of
+                BInsert fa ->
+                    let fb = uncurry toFrag
+                            $ either (unique bp ,) (unique bq ,) es
+                    in  fromMaybe (ba', saa, upp) $
+                        (do (sa, up') <- fill bl bp $ FCons fa fb
+                            return (mempty, inL u sa, upq b (Left sa) up'))
+                        `mplus`
+                        (do (sa, up') <- fill br bq $ FCons fa fb
+                            return (mempty, inR u sa, upq b (Right sa) up'))
+                _ -> (ba', saa, upp)
 
 instance Syntax (Poly Syntax Builder) where
     pure a = Poly (pure a) Builder
@@ -252,13 +279,13 @@ replaceByBubble u (replace u -> Just (up, sa), _, _) = (mempty, sa, up)
 replaceByBubble u r                                  = r
 
 filler :: Builder a
-       -> (Blueprint -> Fragment Scaffold -> Maybe (Scaffold a, Updater a))
-       -> Blueprint -> Fragment Scaffold -> Maybe (Scaffold a, Updater a)
-filler bl up b fs =
+       -> (Blueprint -> Fill -> Maybe (Scaffold a, Updater a))
+       -> Blueprint -> Fill -> Maybe (Scaffold a, Updater a)
+filler bl up b (FOne fs) =
     case fromFrag (unique b) fs of
-        Nothing -> up b fs
+        Nothing -> up b (FOne fs)
         Just sa -> Just (sa, build bl b sa)
-
+filler bl up b fl = up b fl
 
 
 
