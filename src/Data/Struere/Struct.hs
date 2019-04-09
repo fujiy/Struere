@@ -64,6 +64,7 @@ root = Seq.empty
 fromList :: [Int] -> Position
 fromList = Seq.fromList
 
+type Token = Char
 
 -- data Distr d = None
 --              | Pure d
@@ -355,8 +356,13 @@ decoerce u (Scaffold u' ma (Coerce sb)) | u == u'
              = Just (unsafeCoerce sb)
 decoerce u _ = traceShow u Nothing
 
-coerceSC :: Unique -> Iso a b -> Scaffold a -> Scaffold b
-coerceSC u iso sb = Scaffold u (value sb >>= apply iso) (Coerce sb)
+coerceSC :: Unique -> Iso a b -> Scaffold a -> (Bool, Scaffold b)
+coerceSC u iso sa = maybe
+    (False, Scaffold u Nothing (Coerce sa))
+    (maybe (False, Scaffold u Nothing (Coerce sa))
+           (\b -> (True, Scaffold u (Just b) (Coerce sa)))
+           . apply iso)
+    (value sa)
 
 depair :: Scaffold (a, b) -> (Scaffold a, Scaffold b)
 depair (Scaffold _ _ (Pair sa sb)) = (sa, sb)
@@ -501,7 +507,7 @@ showB = go IntSet.empty
                     else go us' a
             s   = case sc of
                 IsoMap _ x  -> "IsoMap" ++ go' x
-                Product x y -> "Alter"  ++ go' x ++ go' y
+                Product x y -> "Product"  ++ go' x ++ go' y
                 Alter x y   -> "Alter"  ++ go' x ++ go' y
                 Empty       -> "Empty"
                 End         -> "End"
@@ -616,6 +622,8 @@ fromFrag :: Unique -> Fragment f -> Maybe (f a)
 fromFrag u (Fragment u' fa) | u == u' = Just $ unsafeCoerce fa
 fromFrag _ _                = Nothing
 
+instance Show (Fragment Scaffold) where
+    show (Fragment u _) = show u ++ "<<fragment>>"
 
 -- move :: Monoid a => Struct -> Pos.Path -> Distr a -> Distr a
 -- move st (Pos.Path u x p) = nexts x st . ups' u

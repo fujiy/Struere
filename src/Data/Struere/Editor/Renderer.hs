@@ -26,7 +26,7 @@ newtype Renderer a = Renderer
 instance IsoFunctor Renderer where
     iso <$> Renderer f = Renderer
         $ \(BIsoMap u bp) cs sa ->
-         maybe (hole "I") (f bp cs) $ decoerce u sa
+         maybe (hole $ "I" ++ show u) (f bp cs) $ decoerce u sa
 
         -- maybeList . fmap (f cs) . unapply iso
 

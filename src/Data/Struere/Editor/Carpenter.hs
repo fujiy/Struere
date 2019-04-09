@@ -41,8 +41,6 @@ data Instr = INone
 
 type Instrs = Distr Instr
 
-instance Show (Fragment Scaffold) where
-    show _ = "<<fragment>>"
 
 instance Semigroup Instr where
     INone <> x     = x
@@ -63,16 +61,16 @@ data Fill = FOne  (Fragment Scaffold)
 data Bubble = BNone
             | BDelete
             | BReplace (Fragment Updater) (Fragment Scaffold)
-            | BInsert (Fragment Scaffold)
-            | BAppend (Fragment Scaffold) (Fragment Scaffold)
-            | BReject
-            -- | BInsertRec (Fragment Updater) (Fragment Scaffold)
+            | BInsert  (Fragment Scaffold)
+            | BAppend  (Fragment Scaffold) (Fragment Scaffold)
+            | BReject Instr
 
 instance Show Bubble where
     show BNone          = "BNone"
     show BDelete        = "BDelete"
     show (BReplace _ _) = "BReplace"
     show (BInsert _)    = "BInsert"
+    show (BReject _)    = "BReject"
 
 instance Semigroup Bubble where
     BNone <> x     = x
@@ -102,18 +100,23 @@ builder bp p a = do
 instance IsoFunctor (Poly Syntax Builder) where
     iso <$> Poly p bl = Poly (iso <$> p) $
         fix $ \fbl -> Builder
-        { build = \(BIsoMap u bp) (decoerce u -> Just sb) ->
-                up u $ build bl bp sb
+        { build = \(BIsoMap u bp) sb@(decoerce u -> Just sa) ->
+                up u sb $ build bl bp sa
         , fill = filler fbl $
             \(BIsoMap u bp) fs -> do
                 (sa, ua) <- fill bl bp fs
-                return (coerceSC u iso sa, up u ua)
+                let (accepted, sb) = coerceSC u iso sa
+                if accepted then return (sb, up u sb ua) else Nothing
         }
       where
-        up u ua = Updater $ \is ->
-            let (b, sa, ua') = update ua is
-                sb       = coerceSC u iso sa
-            in replaceByBubble u (b, sb, up u ua')
+        up u sb ua = Updater $ \is ->
+            let (b, sa, ua')    = update ua is
+                (accepted, sb') = coerceSC u iso sa
+                b'              = applyUnless accepted
+                                  ((BReject $ flatten' is) <>) b
+                sb''            = if accepted then sb' else sb
+                ua''            = if accepted then ua' else ua
+            in  replaceByBubble u (b', sb'', up u sb'' ua'')
 
 
 instance ProductFunctor (Poly Syntax Builder) where
@@ -140,11 +143,12 @@ instance ProductFunctor (Poly Syntax Builder) where
                 --          sab = pairSC u sa sb
                 --          up  = build bl bp sa
                 --      return (sab, upq b sab up uq))
-                    FCons fa fb -> traceShow "fcons" $ do
-                        (sa, up) <- traceShow "a" $ fill bl bp $ FOne fa
-                        (sb, uq) <- traceShow "b" $ fill br bq $ FOne fb
+                    FCons fa fb -> do
+                        (sa, up) <- fill bl bp $ FOne fa
+                        (sb, uq) <- fill br bq $ FOne fb
                         let sab = pairSC u sa sb
-                        return (sab, upq b sab up uq)
+                        traceShow (u, unique bq, fb, isJust $ value sb)
+                            return (sab, upq b sab up uq)
 
 
 
@@ -168,7 +172,8 @@ instance ProductFunctor (Poly Syntax Builder) where
                     (BReplace fuq fsb, sab', upq b sab' up' uq')
                 (_, BDelete) ->
                     (BReplace fup fsa, sab', upq b sab' up' uq')
-                (BInsert fa, _) -> fromMaybe (bx, sab', upq') $ do
+                (BInsert fa, _) -> fromMaybe (bx, sab, upq b sab up uq')
+                    $ do
                     (sa', up'') <- fill bl bp $ FOne fa
                     (sb', uq'') <- fill br bq $ FOne $ toFrag u sab'
                     let sab'' = pairSC u sa' sb'
@@ -206,22 +211,27 @@ instance Alter (Poly Syntax Builder) where
                     Right sa -> let (ba, sa', up') = update up is
                                 in  (ba, inR u sa', upq b (Right sa') up')
             in case ba' of
-                BInsert fa ->
-                    let fb = uncurry toFrag
-                            $ either (unique bp ,) (unique bq ,) es
-                    in  fromMaybe (ba', saa, upp) $
-                        (do (sa, up') <- fill bl bp $ FCons fa fb
-                            return (mempty, inL u sa, upq b (Left sa) up'))
-                        `mplus`
-                        (do (sa, up') <- fill br bq $ FCons fa fb
-                            return (mempty, inR u sa, upq b (Right sa) up'))
+                BInsert fa -> fromMaybe (ba', saa, upp) $ case es of
+                    Left sa ->
+                        let fb = toFrag (unique bp) sa
+                        in do (sa', up') <- fill br bq $ FCons fa fb
+                              return (mempty, inR u sa', upq b (Right sa') up')
+                    Right sa ->
+                        let fb = toFrag (unique bq) sa
+                        in do (sa', up') <- fill bl bp $ FCons fa fb
+                              return (mempty, inL u sa', upq b (Left sa') up')
                 _ -> (ba', saa, upp)
 
 instance Syntax (Poly Syntax Builder) where
     pure a = Poly (pure a) Builder
         { build = \_ sa -> up sa
-        , fill = \b _ -> let sa = Scaffold (unique b) (Just a) Edge
-                         in  return (sa, up sa)
+        , fill = \b fbl -> case fbl of
+                FOne fs -> do
+                    sa <- fromFrag (unique b) fs
+                    if value sa == Just a
+                        then return (sa, up sa)
+                        else Nothing
+                _ -> Nothing
         }
       where
         up sa = Updater $ \(Distr x _) -> case x of
