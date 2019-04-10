@@ -64,7 +64,11 @@ instance Syntax Renderer where
         maybe (hole $ "N" ++ show u)
         (\sb -> do
                 es <- v bp (desub dc) sb
-                e <- caret x $ UI.new # set UI.children es
+                e <- caret x $ UI.new
+                    # set UI.children es
+                    # set UI.style [ ("border", "1px solid black")
+                                   , ("margin", "1px")]
+
                 return [e]
         )
         $ desingle' sa

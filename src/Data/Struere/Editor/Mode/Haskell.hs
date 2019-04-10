@@ -41,11 +41,11 @@ defineIsomorphisms ''QName
 type HaskellFile = Module Info
 type Info = (SrcSpanInfo, [Comment])
 
-type Test = Name Info
+type Test = Exp Info
 -- type Test = String
 
 test :: Syntax f => f Test
-test = name
+test = fexpr
 -- test = many alphaNum
 test1 :: Test
 -- test1 = "abc"
@@ -97,7 +97,7 @@ name :: Syntax f => f (Name Info)
 name = ident <$> noInfo <*> identifier <* spaces
 
 identifier :: Syntax f => f String
-identifier = many alphaNum
+identifier = many1 alphaNum
              <?> "identifier"
 
 

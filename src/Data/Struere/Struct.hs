@@ -265,7 +265,7 @@ move cm st d = case cm of
                 (dy', c) = next sy isLast dy b
             in  ( Distr mempty (Cons dx' dy'), a <> c )
         Sub sx      ->
-            let (dx', b) = next sx True (desub dc) a'
+            let (dx', b) = next sx True (desub dc) mempty
             in  ( Distr a' (Sub (narrowLast sx dx' b)), a)
 
 
@@ -279,9 +279,10 @@ move cm st d = case cm of
             let (dx, dy) = deprod dc
                 (dy', b) = prev sy dy a'
                 (dx', c) = prev sx dx b
-            in  ( Distr mempty (Cons dx' dy'), a <> c )
+            in  traceShow (Distr sz sc)
+                ( Distr mempty (Cons dx' dy'), a <> c )
         Sub sx      ->
-            let (dx', b) = prev sx (desub dc) a'
+            let (dx', b) = prev sx (desub dc) mempty
             in  ( Distr a' (Sub (narrowFirst sx dx' b)), a)
 
 narrowLast :: Monoid a => Struct -> Distr a -> a -> Distr a
