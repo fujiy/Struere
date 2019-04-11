@@ -49,7 +49,7 @@ test = fexpr
 -- test = many alphaNum
 test1 :: Test
 -- test1 = "abc"
-Right test1 = traceShowId $ runParser test $ T.pack "abcd"
+Right test1 = traceShowId $ runParser test $ T.pack "abcd efg"
 
 instance Editable (Module (SrcSpanInfo, [Comment])) where
     structure = modulestr

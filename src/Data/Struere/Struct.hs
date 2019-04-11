@@ -279,8 +279,7 @@ move cm st d = case cm of
             let (dx, dy) = deprod dc
                 (dy', b) = prev sy dy a'
                 (dx', c) = prev sx dx b
-            in  traceShow (Distr sz sc)
-                ( Distr mempty (Cons dx' dy'), a <> c )
+            in ( Distr mempty (Cons dx' dy'), a <> c )
         Sub sx      ->
             let (dx', b) = prev sx (desub dc) mempty
             in  ( Distr a' (Sub (narrowFirst sx dx' b)), a)
@@ -623,7 +622,7 @@ fromFrag :: Unique -> Fragment f -> Maybe (f a)
 fromFrag u (Fragment u' fa) | u == u' = Just $ unsafeCoerce fa
 fromFrag _ _                = Nothing
 
-instance Show (Fragment Scaffold) where
+instance Show (Fragment a) where
     show (Fragment u _) = show u ++ "<<fragment>>"
 
 -- move :: Monoid a => Struct -> Pos.Path -> Distr a -> Distr a
